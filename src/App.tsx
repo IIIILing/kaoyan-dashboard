@@ -1,4 +1,4 @@
-import {
+mport {
   BarChart3,
   BookOpen,
   CalendarDays,
@@ -48,16 +48,28 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
 
 const LOCAL_KEY = "kaoyan-dashboard-state-v1";
 const THEME_KEY = "kaoyan-dashboard-theme";
+const LIFE_ACTIVITIES = [
+  { id: "sleep", name: "睡觉", accent: "#6f7fa5" },
+  { id: "exercise", name: "运动", accent: "#3f8b72" },
+  { id: "entertainment", name: "娱乐", accent: "#b27955" },
+] as const;
+const LIFE_ACTIVITY_IDS = new Set<string>(LIFE_ACTIVITIES.map((item) => item.id));
+
+function lifeActivity(subjectId: string) {
+  return LIFE_ACTIVITIES.find((item) => item.id === subjectId);
+}
 
 function localDate(date = new Date()) {
   const offset = date.getTimezoneOffset();
   return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
 
-function minutesBetween(start: string, end: string) {
+function minutesBetween(start: string, end: string, allowOvernight = false) {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
-  return Math.max(0, eh * 60 + em - sh * 60 - sm);
+  const difference = eh * 60 + em - sh * 60 - sm;
+  if (allowOvernight && difference < 0) return difference + 24 * 60;
+  return Math.max(0, difference);
 }
 
 function timeToMinutes(time: string) {
@@ -174,15 +186,16 @@ function daysUntil(date: string) {
 }
 
 function dailyMetrics(sessions: StudySession[], targetHours: number) {
-  const actualMinutes = sessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const completion = sessions.length
-    ? sessions.reduce((sum, item) => sum + item.completion, 0) / sessions.length
+  const studySessions = sessions.filter((item) => !LIFE_ACTIVITY_IDS.has(item.subjectId));
+  const actualMinutes = studySessions.reduce((sum, item) => sum + item.actualMinutes, 0);
+  const completion = studySessions.length
+    ? studySessions.reduce((sum, item) => sum + item.completion, 0) / studySessions.length
     : 0;
-  const focus = sessions.length
-    ? sessions.reduce((sum, item) => sum + item.focus, 0) / sessions.length
+  const focus = studySessions.length
+    ? studySessions.reduce((sum, item) => sum + item.focus, 0) / studySessions.length
     : 0;
-  const review = sessions.length
-    ? sessions.filter((item) => item.note.trim().length >= 6).length / sessions.length
+  const review = studySessions.length
+    ? studySessions.filter((item) => item.note.trim().length >= 6).length / studySessions.length
     : 0;
   const hourRatio = Math.min(1, actualMinutes / Math.max(1, targetHours * 60));
   const score = Math.round(
@@ -483,7 +496,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
                   <span className="timeline-dot"><Check size={13} /></span>
                   <time>{session.start}–{session.end}</time>
                   <strong>{session.task}</strong>
-                  <span>{session.completion}%</span>
+                  <span>{lifeActivity(session.subjectId)?.name ?? `${session.completion}%`}</span>
                 </div>
               ))}
             </div>
@@ -707,7 +720,15 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
   const startDate = new Date(now.getTime() - 90 * 60_000);
   const start = `${String(startDate.getHours()).padStart(2, "0")}:${String(Math.floor(startDate.getMinutes() / 5) * 5).padStart(2, "0")}`;
   const [form, setForm] = useState({ date: localDate(), start, end, subjectId: "math", task: "", completion: 100, focus: 4, note: "" });
-  const plannedMinutes = minutesBetween(form.start, form.end);
+  const selectedActivity = lifeActivity(form.subjectId);
+  const isLifeActivity = Boolean(selectedActivity);
+  const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
+  function changeCategory(subjectId: string) {
+    const previousActivity = lifeActivity(form.subjectId);
+    const nextActivity = lifeActivity(subjectId);
+    const canAutofill = !form.task.trim() || form.task === previousActivity?.name;
+    setForm({ ...form, subjectId, task: nextActivity && canAutofill ? nextActivity.name : form.task });
+  }
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!form.task.trim() || plannedMinutes <= 0) return;
@@ -716,25 +737,25 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>记录一个学习时段</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>记录一个时段</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>日期</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label><span>科目</span><select value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
           <label><span>开始时间</span><input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></label>
           <label><span>结束时间</span><input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></label>
-          <label className="wide"><span>本时段任务</span><input autoFocus placeholder="例如：1000题概率统计第1章" value={form.task} onChange={(e) => setForm({ ...form, task: e.target.value })} /></label>
-          <label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(e) => setForm({ ...form, completion: Number(e.target.value) })} /></label>
-          <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: Number(e.target.value) })} /></label>
-          <label className="wide"><span>复盘（可选）</span><textarea placeholder="卡在哪里？下一次从哪里继续？" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+          <label className="wide"><span>{isLifeActivity ? "活动内容" : "本时段任务"}</span><input autoFocus placeholder={isLifeActivity ? `例如：${selectedActivity?.name}` : "例如：1000题概率统计第1章"} value={form.task} onChange={(e) => setForm({ ...form, task: e.target.value })} /></label>
+          {!isLifeActivity && <label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(e) => setForm({ ...form, completion: Number(e.target.value) })} /></label>}
+          {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: Number(e.target.value) })} /></label>}
+          <label className="wide"><span>{isLifeActivity ? "备注（可选）" : "复盘（可选）"}</span><textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "卡在哪里？下一次从哪里继续？"} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
         </div>
-        <div className="dialog-footer"><span>计入有效学习：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || plannedMinutes <= 0}><Check size={17} />保存记录</button></div></div>
+        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || plannedMinutes <= 0}><Check size={17} />保存记录</button></div></div>
       </form>
     </div>
   );
 }
 
 function SessionTable({ sessions, state, onDelete }: { sessions: StudySession[]; state: StudyState; onDelete: (id: string) => void }) {
-  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{session.completion}%</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
+  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
 function ProgressRing({ value, label, compact = false, color }: { value: number; label?: string; compact?: boolean; color?: string }) {
@@ -752,3 +773,4 @@ function EmptyState({ icon: Icon, title, detail, action, onAction }: { icon: typ
 function ScoreGuide({ number, title, detail }: { number: string; title: string; detail: string }) {
   return <div className="guide-item"><span>{number}</span><div><strong>{title}</strong><p>{detail}</p></div></div>;
 }
+
