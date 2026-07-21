@@ -3,6 +3,15 @@ export type Phase = {
   name: string;
   weight: number;
   progress: number;
+  resources: StudyResource[];
+};
+
+export type StudyResource = {
+  id: string;
+  type: "book" | "chapter" | "paper" | "exercise" | "other";
+  name: string;
+  detail: string;
+  completed: boolean;
 };
 
 export type Subject = {
@@ -39,6 +48,63 @@ export type ScoreWeights = {
   exercise: number;
 };
 
+export type WeeklyRuleMetric =
+  | "averageDailyScore"
+  | "recordRate"
+  | "studyTarget"
+  | "healthySleepRate"
+  | "exerciseTarget"
+  | "routineBalance";
+
+export type WeeklyRule = {
+  id: string;
+  name: string;
+  description: string;
+  metric: WeeklyRuleMetric;
+  weight: number;
+  enabled: boolean;
+};
+
+export type PlanItem = {
+  id: string;
+  start: string;
+  end: string;
+  subjectId: string;
+  task: string;
+  note: string;
+};
+
+export type DailyPlan = {
+  date: string;
+  items: PlanItem[];
+};
+
+export type PlanTemplate = {
+  id: string;
+  name: string;
+  items: PlanItem[];
+};
+
+export type ThemeColors = {
+  bg: string;
+  surface: string;
+  text: string;
+  muted: string;
+  primary: string;
+  accent: string;
+  success: string;
+  warn: string;
+  danger: string;
+  sidebarStart: string;
+  sidebarEnd: string;
+};
+
+export type AppearanceSettings = {
+  paletteId: string;
+  customLight: ThemeColors;
+  customDark: ThemeColors;
+};
+
 export type StudyState = {
   version: 1;
   profile: {
@@ -55,9 +121,41 @@ export type StudyState = {
   };
   scoring: {
     weights: ScoreWeights;
+    weeklyRules: WeeklyRule[];
   };
+  appearance: AppearanceSettings;
   subjects: Subject[];
   sessions: StudySession[];
+  plans: DailyPlan[];
+  planTemplates: PlanTemplate[];
+};
+
+export const defaultLightColors: ThemeColors = {
+  bg: "#f4f3ef",
+  surface: "#fffefa",
+  text: "#172532",
+  muted: "#6c7882",
+  primary: "#003b70",
+  accent: "#1d6aa5",
+  success: "#5d8874",
+  warn: "#b17a35",
+  danger: "#b85858",
+  sidebarStart: "#054b80",
+  sidebarEnd: "#00335f",
+};
+
+export const defaultDarkColors: ThemeColors = {
+  bg: "#11161b",
+  surface: "#1a2128",
+  text: "#e7edf2",
+  muted: "#a3afb9",
+  primary: "#123f66",
+  accent: "#62a8dc",
+  success: "#79a895",
+  warn: "#d2a15e",
+  danger: "#db7d7d",
+  sidebarStart: "#0c385b",
+  sidebarEnd: "#082740",
 };
 
 export const defaultStudyState: StudyState = {
@@ -84,6 +182,16 @@ export const defaultStudyState: StudyState = {
       sleep: 20,
       exercise: 10,
     },
+    weeklyRules: [
+      { id: "weekly-daily-score", name: "记录日平均分", description: "综合每日学习质量与作息表现", metric: "averageDailyScore", weight: 75, enabled: true },
+      { id: "weekly-coverage", name: "记录覆盖", description: "本周期有记录的天数占比", metric: "recordRate", weight: 10, enabled: true },
+      { id: "weekly-routine", name: "作息平衡", description: "睡眠、运动、娱乐与深夜学习的综合表现", metric: "routineBalance", weight: 15, enabled: true },
+    ],
+  },
+  appearance: {
+    paletteId: "default",
+    customLight: defaultLightColors,
+    customDark: defaultDarkColors,
   },
   subjects: [
     {
@@ -94,10 +202,10 @@ export const defaultStudyState: StudyState = {
       accent: "#1565a7",
       note: "除概率统计外，基础内容已完成一轮",
       phases: [
-        { id: "math-basic", name: "基础一轮", weight: 30, progress: 85 },
-        { id: "math-intense", name: "强化刷题", weight: 30, progress: 0 },
-        { id: "math-real", name: "历年真题", weight: 25, progress: 0 },
-        { id: "math-mock", name: "模考复盘", weight: 15, progress: 0 },
+        { id: "math-basic", name: "基础一轮", weight: 30, progress: 85, resources: [] },
+        { id: "math-intense", name: "强化刷题", weight: 30, progress: 0, resources: [] },
+        { id: "math-real", name: "历年真题", weight: 25, progress: 0, resources: [] },
+        { id: "math-mock", name: "模考复盘", weight: 15, progress: 0, resources: [] },
       ],
     },
     {
@@ -108,11 +216,11 @@ export const defaultStudyState: StudyState = {
       accent: "#5b7f70",
       note: "计划 7 月底完成单词第一轮",
       phases: [
-        { id: "eng-word-first", name: "单词一轮", weight: 25, progress: 85 },
-        { id: "eng-word-second", name: "单词二轮", weight: 25, progress: 0 },
-        { id: "eng-real", name: "15 年真题", weight: 30, progress: 0 },
-        { id: "eng-mock", name: "模拟卷 20 套", weight: 10, progress: 0 },
-        { id: "eng-writing", name: "写作模板", weight: 10, progress: 0 },
+        { id: "eng-word-first", name: "单词一轮", weight: 25, progress: 85, resources: [] },
+        { id: "eng-word-second", name: "单词二轮", weight: 25, progress: 0, resources: [] },
+        { id: "eng-real", name: "15 年真题", weight: 30, progress: 0, resources: [] },
+        { id: "eng-mock", name: "模拟卷 20 套", weight: 10, progress: 0, resources: [] },
+        { id: "eng-writing", name: "写作模板", weight: 10, progress: 0, resources: [] },
       ],
     },
     {
@@ -123,10 +231,10 @@ export const defaultStudyState: StudyState = {
       accent: "#b47a32",
       note: "尚未开始",
       phases: [
-        { id: "pol-basic", name: "基础课程", weight: 30, progress: 0 },
-        { id: "pol-choice", name: "选择题强化", weight: 35, progress: 0 },
-        { id: "pol-recite", name: "主观题背诵", weight: 25, progress: 0 },
-        { id: "pol-mock", name: "套卷模考", weight: 10, progress: 0 },
+        { id: "pol-basic", name: "基础课程", weight: 30, progress: 0, resources: [] },
+        { id: "pol-choice", name: "选择题强化", weight: 35, progress: 0, resources: [] },
+        { id: "pol-recite", name: "主观题背诵", weight: 25, progress: 0, resources: [] },
+        { id: "pol-mock", name: "套卷模考", weight: 10, progress: 0, resources: [] },
       ],
     },
     {
@@ -137,14 +245,16 @@ export const defaultStudyState: StudyState = {
       accent: "#755c9f",
       note: "专业课尚未开始",
       phases: [
-        { id: "cir-first", name: "一轮复习", weight: 30, progress: 0 },
-        { id: "cir-chapter", name: "章节习题", weight: 20, progress: 0 },
-        { id: "cir-real", name: "历年真题", weight: 30, progress: 0 },
-        { id: "cir-material", name: "机构资料", weight: 20, progress: 0 },
+        { id: "cir-first", name: "一轮复习", weight: 30, progress: 0, resources: [] },
+        { id: "cir-chapter", name: "章节习题", weight: 20, progress: 0, resources: [] },
+        { id: "cir-real", name: "历年真题", weight: 30, progress: 0, resources: [] },
+        { id: "cir-material", name: "机构资料", weight: 20, progress: 0, resources: [] },
       ],
     },
   ],
   sessions: [],
+  plans: [],
+  planTemplates: [],
 };
 
 export function subjectProgress(subject: Subject) {

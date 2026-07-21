@@ -12,6 +12,7 @@ import {
   Home,
   ListTodo,
   Moon,
+  Palette,
   Plus,
   RotateCcw,
   Save,
@@ -28,10 +29,18 @@ import {
   defaultStudyState,
   projectProgress,
   subjectProgress,
+  type DailyPlan,
+  type PlanItem,
+  type PlanTemplate,
   type ScoreWeights,
   type StudySession,
+  type StudyResource,
   type StudyState,
+  type Subject,
+  type ThemeColors,
+  type WeeklyRuleMetric,
 } from "./study-state";
+import { applyThemePalette, COLOR_FIELDS, THEME_PALETTES } from "./theme-palettes";
 
 type View = "overview" | "today" | "records" | "subjects" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
@@ -58,6 +67,23 @@ const SCORE_WEIGHT_FIELDS: { key: keyof ScoreWeights; label: string; detail: str
   { key: "sleep", label: "睡眠作息", detail: "7–9 小时为满分区间" },
   { key: "exercise", label: "运动安排", detail: "时长与时段综合评价" },
 ];
+
+const WEEKLY_METRICS: { value: WeeklyRuleMetric; label: string }[] = [
+  { value: "averageDailyScore", label: "记录日平均分" },
+  { value: "recordRate", label: "记录覆盖率" },
+  { value: "studyTarget", label: "学习目标达成率" },
+  { value: "healthySleepRate", label: "健康睡眠达标率" },
+  { value: "exerciseTarget", label: "运动目标达成率" },
+  { value: "routineBalance", label: "作息平衡" },
+];
+
+const RESOURCE_TYPES = [
+  { value: "book", label: "书本" },
+  { value: "chapter", label: "章节" },
+  { value: "paper", label: "试卷" },
+  { value: "exercise", label: "习题集" },
+  { value: "other", label: "其他" },
+] as const;
 
 const LOCAL_KEY = "kaoyan-dashboard-state-v1";
 const THEME_KEY = "kaoyan-dashboard-theme";
@@ -115,6 +141,20 @@ function presetRange(preset: "day" | "week" | "month", anchor: string): DateRang
 
 function isInRange(date: string, range: DateRange) {
   return date >= range.from && date <= range.to;
+}
+
+function downloadFile(content: string, filename: string, type = "application/json") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function clonePlanItems(items: PlanItem[]) {
+  return items.map((item) => ({ ...item, id: crypto.randomUUID() }));
 }
 
 function normalizedTask(task: string) {
@@ -358,6 +398,7 @@ function periodSummary(
   dates: string[],
   targetHours: number,
   weights: ScoreWeights,
+  weeklyRules = defaultStudyState.scoring.weeklyRules,
 ) {
   const days = dates.map((date) => dailyMetrics(sessionsForDate(sessions, date), targetHours, weights));
   const recordedDays = days.filter((item) => item.hasRecords);
@@ -388,9 +429,25 @@ function periodSummary(
     clampRatio(exerciseMinutes / Math.max(1, exerciseTarget)) * 0.3 +
     entertainmentBalance * 0.15 +
     lateStudyBalance * 0.15;
+  const metricRatios: Record<WeeklyRuleMetric, number> = {
+    averageDailyScore: clampRatio(averageDailyScore / 100),
+    recordRate,
+    studyTarget: clampRatio(totalStudyMinutes / Math.max(1, dates.length * targetHours * 60)),
+    healthySleepRate,
+    exerciseTarget: clampRatio(exerciseMinutes / Math.max(1, exerciseTarget)),
+    routineBalance,
+  };
+  const enabledRules = weeklyRules.filter((rule) => rule.enabled && rule.weight > 0);
+  const ruleWeight = enabledRules.reduce((sum, rule) => sum + rule.weight, 0) || 1;
+  const ruleResults = enabledRules.map((rule) => ({
+    ...rule,
+    ratio: metricRatios[rule.metric],
+    points: metricRatios[rule.metric] * rule.weight,
+  }));
+  const periodScore = Math.round(ruleResults.reduce((sum, rule) => sum + rule.points, 0) / ruleWeight * 100);
   return {
     days: dates.length,
-    periodScore: Math.round(averageDailyScore * 0.75 + recordRate * 10 + routineBalance * 15),
+    periodScore,
     averageDailyScore: Math.round(averageDailyScore),
     recordRate,
     averageSleepMinutes: sleepDays.length
@@ -404,16 +461,19 @@ function periodSummary(
     totalStudyMinutes,
     lateStudyMinutes,
     routineBalance,
+    ruleResults,
   };
 }
 
 export default function Dashboard() {
   const [state, setState] = useState<StudyState>(defaultStudyState);
   const [view, setView] = useState<View>("overview");
+  const [planDate, setPlanDate] = useState(localDate());
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
   const [importCandidate, setImportCandidate] = useState<StudyState | null>(null);
@@ -446,7 +506,31 @@ export default function Dashboard() {
                 ...defaultStudyState.scoring.weights,
                 ...parsed.scoring?.weights,
               },
+              weeklyRules: Array.isArray(parsed.scoring?.weeklyRules)
+                ? parsed.scoring.weeklyRules
+                : defaultStudyState.scoring.weeklyRules,
             },
+            appearance: {
+              ...defaultStudyState.appearance,
+              ...parsed.appearance,
+              customLight: {
+                ...defaultStudyState.appearance.customLight,
+                ...parsed.appearance?.customLight,
+              },
+              customDark: {
+                ...defaultStudyState.appearance.customDark,
+                ...parsed.appearance?.customDark,
+              },
+            },
+            subjects: parsed.subjects.map((subject) => ({
+              ...subject,
+              phases: subject.phases.map((phase) => ({
+                ...phase,
+                resources: Array.isArray(phase.resources) ? phase.resources : [],
+              })),
+            })),
+            plans: Array.isArray(parsed.plans) ? parsed.plans : [],
+            planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
           };
           const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
           const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
@@ -526,8 +610,21 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer);
   }, [state, loaded]);
 
+  useEffect(() => {
+    applyThemePalette(state.appearance, theme);
+  }, [state.appearance, theme]);
+
   const today = localDate();
   const todaySessions = useMemo(() => sessionsForDate(state.sessions, today), [state.sessions, today]);
+  const activePlan = useMemo<DailyPlan>(
+    () => state.plans.find((plan) => plan.date === planDate) ?? { date: planDate, items: [] },
+    [state.plans, planDate],
+  );
+  const planSessions = useMemo(() => sessionsForDate(state.sessions, planDate), [state.sessions, planDate]);
+  const planMetrics = useMemo(
+    () => dailyMetrics(planSessions, state.profile.dailyTargetHours, state.scoring.weights),
+    [planSessions, state.profile.dailyTargetHours, state.scoring.weights],
+  );
   const todayMetrics = useMemo(
     () => dailyMetrics(todaySessions, state.profile.dailyTargetHours, state.scoring.weights),
     [todaySessions, state.profile.dailyTargetHours, state.scoring.weights],
@@ -548,12 +645,12 @@ export default function Dashboard() {
     [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
   );
   const weekSummary = useMemo(
-    () => periodSummary(state.sessions, sevenDates, state.profile.dailyTargetHours, state.scoring.weights),
-    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
+    () => periodSummary(state.sessions, sevenDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules),
+    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules],
   );
   const monthSummary = useMemo(
-    () => periodSummary(state.sessions, thirtyDates, state.profile.dailyTargetHours, state.scoring.weights),
-    [thirtyDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
+    () => periodSummary(state.sessions, thirtyDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules),
+    [thirtyDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules],
   );
   const activeDays = weekMetrics.filter((item) => item.hasRecords);
   const weeklyAverage = activeDays.length
@@ -585,6 +682,26 @@ export default function Dashboard() {
     updateState((current) => ({
       ...current,
       sessions: current.sessions.filter((item) => item.id !== id),
+    }));
+  }
+
+  function addPlanItem(item: PlanItem) {
+    updateState((current) => {
+      const existing = current.plans.find((plan) => plan.date === planDate);
+      const plans = existing
+        ? current.plans.map((plan) => plan.date === planDate ? { ...plan, items: [...plan.items, item] } : plan)
+        : [...current.plans, { date: planDate, items: [item] }];
+      return { ...current, plans };
+    });
+    setPlanOpen(false);
+  }
+
+  function deletePlanItem(id: string) {
+    updateState((current) => ({
+      ...current,
+      plans: current.plans.map((plan) => plan.date === planDate
+        ? { ...plan, items: plan.items.filter((item) => item.id !== id) }
+        : plan),
     }));
   }
 
@@ -696,13 +813,24 @@ export default function Dashboard() {
           />
         )}
         {view === "today" && (
-          <TodayView state={state} sessions={todaySessions} metrics={todayMetrics} onRecord={() => setRecordOpen(true)} onDelete={deleteSession} />
+          <TodayView
+            state={state}
+            plan={activePlan}
+            sessions={planSessions}
+            metrics={planMetrics}
+            planDate={planDate}
+            onPlanDateChange={setPlanDate}
+            updateState={updateState}
+            onAddPlan={() => setPlanOpen(true)}
+            onRecord={() => setRecordOpen(true)}
+            onDeletePlan={deletePlanItem}
+          />
         )}
         {view === "records" && (
           <RecordsView state={state} onRecord={() => setRecordOpen(true)} onDelete={deleteSession} />
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
-        {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} />}
+        {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} summary={weekSummary} />}
         {view === "scoring" && (
           <ScoringView
             state={state}
@@ -728,6 +856,7 @@ export default function Dashboard() {
       </main>
 
       {recordOpen && <RecordDialog state={state} onClose={() => setRecordOpen(false)} onSave={addSession} />}
+      {planOpen && <PlanItemDialog state={state} onClose={() => setPlanOpen(false)} onSave={addPlanItem} />}
       {backupMode && (
         <BackupDialog
           mode={backupMode}
@@ -814,25 +943,145 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   );
 }
 
-function TodayView({ state, sessions, metrics, onRecord, onDelete }: { state: StudyState; sessions: StudySession[]; metrics: ReturnType<typeof dailyMetrics>; onRecord: () => void; onDelete: (id: string) => void }) {
+function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onDeletePlan }: {
+  state: StudyState;
+  plan: DailyPlan;
+  sessions: StudySession[];
+  metrics: ReturnType<typeof dailyMetrics>;
+  planDate: string;
+  onPlanDateChange: (date: string) => void;
+  updateState: (updater: (current: StudyState) => StudyState) => void;
+  onAddPlan: () => void;
+  onRecord: () => void;
+  onDeletePlan: (id: string) => void;
+}) {
+  const importRef = useRef<HTMLInputElement>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const selectedTemplate = state.planTemplates.find((template) => template.id === selectedTemplateId)
+    ?? state.planTemplates[0];
+  const plannedMinutes = plan.items.reduce(
+    (sum, item) => sum + minutesBetween(item.start, item.end, item.subjectId === "sleep"),
+    0,
+  );
+
+  function replaceTodayPlan(items: PlanItem[]) {
+    updateState((current) => ({
+      ...current,
+      plans: current.plans.some((item) => item.date === plan.date)
+        ? current.plans.map((item) => item.date === plan.date ? { ...item, items } : item)
+        : [...current.plans, { date: plan.date, items }],
+    }));
+  }
+
+  function exportPlan() {
+    downloadFile(JSON.stringify({ kind: "kaoyan-daily-plan", version: 1, ...plan }, null, 2), `每日计划-${plan.date}.json`);
+  }
+
+  function exportPlanArchive() {
+    downloadFile(JSON.stringify({ kind: "kaoyan-plan-archive", version: 1, plans: state.plans, planTemplates: state.planTemplates }, null, 2), "全部每日计划与模板.json");
+  }
+
+  function importPlan(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as Partial<DailyPlan> & { kind?: string; plans?: DailyPlan[]; planTemplates?: PlanTemplate[] };
+        if (Array.isArray(parsed.plans)) {
+          if (!window.confirm(`文件包含 ${parsed.plans.length} 天计划，将按日期替换同日期计划并导入模板，是否继续？`)) return;
+          updateState((current) => {
+            const importedDates = new Set(parsed.plans!.map((item) => item.date));
+            const plans = [...current.plans.filter((item) => !importedDates.has(item.date)), ...parsed.plans!.map((item) => ({ ...item, items: clonePlanItems(item.items ?? []) }))];
+            const templates = Array.isArray(parsed.planTemplates)
+              ? [...current.planTemplates, ...parsed.planTemplates.map((template) => ({ ...template, id: crypto.randomUUID(), items: clonePlanItems(template.items ?? []) }))]
+              : current.planTemplates;
+            return { ...current, plans, planTemplates: templates };
+          });
+          return;
+        }
+        if (!Array.isArray(parsed.items)) throw new Error("invalid");
+        const items = parsed.items.filter((item): item is PlanItem => Boolean(item?.start && item?.end && item?.task && item?.subjectId));
+        if (plan.items.length && !window.confirm("导入会替换今天已有的计划，是否继续？")) return;
+        replaceTodayPlan(clonePlanItems(items));
+      } catch {
+        window.alert("无法导入：请选择由今日计划页面导出的 JSON 文件。");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function saveAsTemplate() {
+    if (!plan.items.length) return;
+    const name = window.prompt("请输入模板名称，例如：高强度数学日");
+    if (!name?.trim()) return;
+    const template: PlanTemplate = { id: crypto.randomUUID(), name: name.trim(), items: clonePlanItems(plan.items) };
+    updateState((current) => ({ ...current, planTemplates: [...current.planTemplates, template] }));
+    setSelectedTemplateId(template.id);
+  }
+
+  function applyTemplate() {
+    if (!selectedTemplate) return;
+    if (plan.items.length && !window.confirm(`应用“${selectedTemplate.name}”会替换今天已有计划，是否继续？`)) return;
+    replaceTodayPlan(clonePlanItems(selectedTemplate.items));
+  }
+
+  function deleteTemplate() {
+    if (!selectedTemplate || !window.confirm(`确定删除计划模板“${selectedTemplate.name}”？`)) return;
+    updateState((current) => ({
+      ...current,
+      planTemplates: current.planTemplates.filter((template) => template.id !== selectedTemplate.id),
+    }));
+    setSelectedTemplateId("");
+  }
+
   return (
     <div className="page-stack narrow-page">
       <section className="summary-strip today-summary">
-        <div><span>今日有效学习</span><strong>{formatMinutes(metrics.actualMinutes)}</strong></div>
-        <div><span>作息效率</span><strong>{Math.round(metrics.timingRatio * 100)}%</strong></div>
+        <div><span>计划总时长</span><strong>{formatMinutes(plannedMinutes)}</strong></div>
+        <div><span>计划时段</span><strong>{plan.items.length}</strong></div>
+        <div><span>实际学习</span><strong>{formatMinutes(metrics.actualMinutes)}</strong></div>
         <div><span>睡眠</span><strong>{formatMinutes(metrics.sleepMinutes)}</strong></div>
         <div><span>运动</span><strong>{formatMinutes(metrics.exerciseMinutes)}</strong></div>
-        <div><span>平均完成度</span><strong>{Math.round(metrics.completion)}%</strong></div>
         <div><span>今日得分</span><strong>{metrics.score}</strong></div>
-        <button className="primary-button" onClick={onRecord}><Plus size={17} />新增时段</button>
+        <button className="primary-button" onClick={onAddPlan}><Plus size={17} />新增计划</button>
       </section>
+      <div className="page-actions plan-actions">
+        <div className="plan-date-control"><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, -1))}>前一天</button><label><span>计划日期</span><input type="date" value={planDate} onChange={(event) => event.target.value && onPlanDateChange(event.target.value)} /></label><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, 1))}>后一天</button><button className="text-button" onClick={() => onPlanDateChange(localDate())}>回到今天</button></div>
+        <p className="muted">计划与实际记录相互独立，可浏览过去或提前安排未来日期。</p>
+        <div className="button-row compact-buttons">
+          <button className="secondary-button" onClick={onRecord}><Clock3 size={16} />记录实际</button>
+          <button className="secondary-button" onClick={exportPlan}><Download size={16} />导出计划</button>
+          <button className="secondary-button" onClick={exportPlanArchive}><Download size={16} />导出计划库</button>
+          <button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入计划</button>
+          <button className="secondary-button" disabled={!plan.items.length} onClick={saveAsTemplate}><Save size={16} />保存为模板</button>
+        </div>
+        <input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) importPlan(file);
+          event.target.value = "";
+        }} />
+      </div>
       <section className="panel schedule-panel">
-        <div className="panel-heading"><div><p className="card-kicker">{localDate()}</p><h2>今日计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
-        <DayScheduleChart sessions={sessions} state={state} mode="planned" />
+        <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>{plan.date === localDate() ? "今日" : "当日"}计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
+        <DayScheduleChart entries={plan.items} state={state} mode="planned" />
+        {plan.items.length > 0 && <><div className="schedule-table-divider" /><PlanTable items={plan.items} state={state} onDelete={onDeletePlan} /></>}
+      </section>
+      <section className="panel template-panel">
+        <div className="panel-heading"><div><p className="card-kicker">可复用安排</p><h2>计划模板预览</h2></div><span className="muted">{state.planTemplates.length} 个模板</span></div>
+        {selectedTemplate ? (
+          <>
+            <div className="template-toolbar">
+              <label><span>选择模板</span><select value={selectedTemplate.id} onChange={(event) => setSelectedTemplateId(event.target.value)}>{state.planTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+              <div><button className="primary-button" onClick={applyTemplate}>应用到今天</button><button className="danger-button" onClick={deleteTemplate}><Trash2 size={15} />删除模板</button></div>
+            </div>
+            <DayScheduleChart entries={selectedTemplate.items} state={state} mode="planned" />
+          </>
+        ) : (
+          <div className="schedule-empty">今天安排好计划后，点击“保存为模板”，即可在这里选择并预览。</div>
+        )}
       </section>
       <section className="panel">
-        <div className="panel-heading"><div><p className="card-kicker">{localDate()}</p><h2>今天的分时记录</h2></div><span className="muted">目标 {state.profile.dailyTargetHours} 小时</span></div>
-        {sessions.length ? <SessionTable sessions={sessions} state={state} onDelete={onDelete} /> : <EmptyState icon={Clock3} title="把一天拆成真实时段" detail="建议每段 45–150 分钟，完成后立即填写完成度和专注度。" action="记录第一个时段" onAction={onRecord} />}
+        <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>当天的实际记录</h2></div><span className="muted">目标 {state.profile.dailyTargetHours} 小时</span></div>
+        {sessions.length ? <DayScheduleChart entries={sessions} state={state} mode="actual" /> : <EmptyState icon={Clock3} title="今天还没有实际记录" detail="执行计划后记录真实时段，计划图与实际图会分别保留。" action="记录第一个时段" onAction={onRecord} />}
       </section>
     </div>
   );
@@ -846,7 +1095,7 @@ function RecordsView({ state, onRecord, onDelete }: { state: StudyState; onRecor
       {dates.length ? dates.map((date) => (
         <section className="panel" key={date}>
           <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
-          <DayScheduleChart sessions={sessionsForDate(state.sessions, date)} state={state} mode="actual" />
+          <DayScheduleChart entries={sessionsForDate(state.sessions, date)} state={state} mode="actual" />
           <div className="schedule-table-divider" />
           <SessionTable sessions={sessionsForDate(state.sessions, date)} state={state} onDelete={onDelete} />
         </section>
@@ -856,46 +1105,181 @@ function RecordsView({ state, onRecord, onDelete }: { state: StudyState; onRecor
 }
 
 function SubjectsView({ state, updateState }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void }) {
+  const importRef = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState<{ subjectId: string; phaseId: string } | null>(null);
+
+  function addPhase(subject: Subject) {
+    if (!window.confirm(`即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`)) return;
+    const phase = { id: crypto.randomUUID(), name: "新阶段", weight: 10, progress: 0, resources: [] };
+    updateState((current) => ({
+      ...current,
+      subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: [...item.phases, phase] } : item),
+    }));
+    setEditing({ subjectId: subject.id, phaseId: phase.id });
+  }
+
+  function exportSubjects() {
+    downloadFile(JSON.stringify({ kind: "kaoyan-subject-progress", version: 1, subjects: state.subjects }, null, 2), "科目进度配置.json");
+  }
+
+  function importSubjects(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as { subjects?: Subject[] };
+        if (!Array.isArray(parsed.subjects) || !parsed.subjects.every((subject) => subject.id && subject.name && Array.isArray(subject.phases))) throw new Error("invalid");
+        if (!window.confirm("导入会替换当前全部科目、阶段和资料进度，时间记录仍会保留。是否继续？")) return;
+        updateState((current) => ({
+          ...current,
+          subjects: parsed.subjects!.map((subject) => ({
+            ...subject,
+            phases: subject.phases.map((phase) => ({ ...phase, resources: Array.isArray(phase.resources) ? phase.resources : [] })),
+          })),
+        }));
+      } catch {
+        window.alert("无法导入：请选择由科目进度页面导出的 JSON 文件。");
+      }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div className="page-stack">
       <section className="progress-hero panel">
         <div><p className="card-kicker">加权总进度</p><strong>{projectProgress(state.subjects)}%</strong><p className="muted">科目权重可在设置中调整；阶段进度会自动折算。</p></div>
-        <ProgressRing value={projectProgress(state.subjects)} />
+        <div className="progress-hero-actions"><ProgressRing value={projectProgress(state.subjects)} /><div className="button-row"><button className="secondary-button" onClick={exportSubjects}><Download size={16} />导出科目 JSON</button><button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入科目 JSON</button></div><input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importSubjects(file); event.target.value = ""; }} /></div>
       </section>
       <section className="subject-detail-grid">
         {state.subjects.map((subject) => (
           <article className="panel subject-detail" key={subject.id}>
-            <div className="panel-heading"><div><p className="card-kicker">占总计划 {subject.weight}%</p><h2>{subject.name}</h2></div><span className="score-badge" style={{ color: subject.accent }}>{subjectProgress(subject)}%</span></div>
+            <div className="panel-heading"><div><p className="card-kicker">占总计划 {subject.weight}%</p><h2>{subject.name}</h2></div><div className="heading-actions"><span className="score-badge" style={{ color: subject.accent }}>{subjectProgress(subject)}%</span><button className="secondary-button" onClick={() => addPhase(subject)}><Plus size={15} />新增阶段</button></div></div>
             <p className="subject-note">{subject.note}</p>
             <div className="phase-list">
               {subject.phases.map((phase) => (
-                <label className="phase-row" key={phase.id}>
-                  <div><span>{phase.name}</span><small>阶段权重 {phase.weight}%</small></div>
+                <div className="phase-row" key={phase.id}>
+                  <button className="phase-open" onClick={() => setEditing({ subjectId: subject.id, phaseId: phase.id })}><span>{phase.name}</span><small>阶段权重 {phase.weight}% · {phase.resources.length} 项资料</small></button>
                   <input type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
                     const value = Number(event.target.value);
                     updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? { ...p, progress: value } : p) } : item) }));
                   }} style={{ "--range-color": subject.accent } as React.CSSProperties} />
                   <strong>{phase.progress}%</strong>
-                </label>
+                </div>
               ))}
             </div>
           </article>
         ))}
       </section>
+      {editing && <PhaseEditorDialog state={state} subjectId={editing.subjectId} phaseId={editing.phaseId} updateState={updateState} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function WeeklyView({ state, metrics, average }: { state: StudyState; metrics: (ReturnType<typeof dailyMetrics> & { date: string })[]; average: number }) {
+function PhaseEditorDialog({ state, subjectId, phaseId, updateState, onClose }: {
+  state: StudyState;
+  subjectId: string;
+  phaseId: string;
+  updateState: (updater: (current: StudyState) => StudyState) => void;
+  onClose: () => void;
+}) {
+  const subject = state.subjects.find((item) => item.id === subjectId);
+  const phase = subject?.phases.find((item) => item.id === phaseId);
+  const [resourceForm, setResourceForm] = useState<{ type: StudyResource["type"]; name: string; detail: string }>({ type: "book", name: "", detail: "" });
+  if (!subject || !phase) return null;
+  const activeSubject = subject;
+  const activePhase = phase;
+
+  function updatePhase(changes: Partial<Subject["phases"][number]>) {
+    updateState((current) => ({
+      ...current,
+      subjects: current.subjects.map((item) => item.id === subjectId
+        ? { ...item, phases: item.phases.map((entry) => entry.id === phaseId ? { ...entry, ...changes } : entry) }
+        : item),
+    }));
+  }
+
+  function updateResources(updater: (resources: StudyResource[]) => StudyResource[], syncProgress = false) {
+    const resources = updater(activePhase.resources);
+    const progress = syncProgress && resources.length
+      ? Math.round(resources.filter((resource) => resource.completed).length / resources.length * 100)
+      : activePhase.progress;
+    updatePhase({ resources, progress });
+  }
+
+  function addResource(event: React.FormEvent) {
+    event.preventDefault();
+    if (!resourceForm.name.trim()) return;
+    updateResources((resources) => [...resources, { id: crypto.randomUUID(), ...resourceForm, name: resourceForm.name.trim(), detail: resourceForm.detail.trim(), completed: false }], true);
+    setResourceForm({ ...resourceForm, name: "", detail: "" });
+  }
+
+  function deletePhase() {
+    if (!window.confirm(`确定删除“${activeSubject.name} / ${activePhase.name}”及其中的 ${activePhase.resources.length} 项资料？此操作无法撤销。`)) return;
+    updateState((current) => ({
+      ...current,
+      subjects: current.subjects.map((item) => item.id === subjectId ? { ...item, phases: item.phases.filter((entry) => entry.id !== phaseId) } : item),
+    }));
+    onClose();
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="phase-dialog" role="dialog" aria-modal="true" aria-label="编辑复习阶段">
+        <div className="dialog-heading"><div><p className="card-kicker">{subject.name}</p><h2>{phase.name}</h2></div><button onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="phase-editor-basics">
+          <label><span>阶段名称</span><input value={phase.name} onChange={(event) => updatePhase({ name: event.target.value })} /></label>
+          <label><span>阶段权重</span><input type="number" min="0" max="100" value={phase.weight} onChange={(event) => updatePhase({ weight: Math.max(0, Number(event.target.value)) })} /></label>
+          <label><span>当前进度：{phase.progress}%</span><input type="range" min="0" max="100" value={phase.progress} onChange={(event) => updatePhase({ progress: Number(event.target.value) })} /></label>
+        </div>
+        <div className="resource-heading"><div><p className="card-kicker">完成清单</p><h3>书本、章节、试卷与习题集</h3></div><span className="muted">完成勾选会自动同步阶段进度</span></div>
+        <form className="resource-add-form" onSubmit={addResource}>
+          <select value={resourceForm.type} onChange={(event) => setResourceForm({ ...resourceForm, type: event.target.value as StudyResource["type"] })}>{RESOURCE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select>
+          <input value={resourceForm.name} placeholder="名称，如《高等数学辅导讲义》" onChange={(event) => setResourceForm({ ...resourceForm, name: event.target.value })} />
+          <input value={resourceForm.detail} placeholder="章节、题量或完成要求" onChange={(event) => setResourceForm({ ...resourceForm, detail: event.target.value })} />
+          <button className="primary-button"><Plus size={16} />新增</button>
+        </form>
+        <div className="resource-list">
+          {phase.resources.map((resource) => (
+            <div className={`resource-row ${resource.completed ? "completed" : ""}`} key={resource.id}>
+              <input type="checkbox" checked={resource.completed} onChange={() => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, completed: !item.completed } : item), true)} />
+              <span className="resource-type">{RESOURCE_TYPES.find((type) => type.value === resource.type)?.label}</span>
+              <input value={resource.name} aria-label="资料名称" onChange={(event) => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, name: event.target.value } : item))} />
+              <input value={resource.detail} aria-label="资料要求" placeholder="完成要求" onChange={(event) => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, detail: event.target.value } : item))} />
+              <button onClick={() => updateResources((resources) => resources.filter((item) => item.id !== resource.id), true)} aria-label="删除资料"><Trash2 size={16} /></button>
+            </div>
+          ))}
+          {!phase.resources.length && <div className="schedule-empty">暂无资料，使用上方表单加入书本、章节、试卷或习题集。</div>}
+        </div>
+        <div className="dialog-footer"><button className="danger-button" onClick={deletePhase}><Trash2 size={16} />删除整个阶段</button><div><button className="primary-button" onClick={onClose}><Check size={16} />完成编辑</button></div></div>
+      </section>
+    </div>
+  );
+}
+
+function WeeklyView({ state, metrics, average, summary }: { state: StudyState; metrics: (ReturnType<typeof dailyMetrics> & { date: string })[]; average: number; summary: ReturnType<typeof periodSummary> }) {
   const maxMinutes = Math.max(...metrics.map((item) => item.actualMinutes), state.profile.dailyTargetHours * 60);
   const total = metrics.reduce((sum, item) => sum + item.actualMinutes, 0);
+  function exportMarkdown() {
+    const from = metrics[0]?.date ?? localDate();
+    const to = metrics.at(-1)?.date ?? localDate();
+    const dailyRows = metrics.map((item) => `| ${item.date} | ${(item.actualMinutes / 60).toFixed(1)}h | ${item.score} | ${formatMinutes(item.sleepMinutes)} | ${formatMinutes(item.exerciseMinutes)} |`).join("\n");
+    const ruleRows = summary.ruleResults.map((rule) => `| ${rule.name} | ${rule.weight} | ${Math.round(rule.ratio * 100)}% | ${(rule.points).toFixed(1)} |`).join("\n");
+    const subjectRows = state.subjects.map((subject) => `| ${subject.name} | ${subject.weight}% | ${subjectProgress(subject)}% |`).join("\n");
+    const markdown = `# ${state.profile.targetSchool}考研学习周报\n\n` +
+      `**周期：** ${from} 至 ${to}  \n**目标：** ${state.profile.targetDescription}  \n**周报得分：** ${summary.periodScore} / 100\n\n` +
+      `## 核心摘要\n\n- 有效学习：${formatMinutes(total)}\n- 活跃天数：${metrics.filter((item) => item.hasRecords).length} / 7\n- 日均得分：${average}\n- 平均睡眠：${formatMinutes(summary.averageSleepMinutes)}\n- 运动累计：${formatMinutes(summary.exerciseMinutes)}\n\n` +
+      `## 每日数据\n\n| 日期 | 有效学习 | 日得分 | 睡眠 | 运动 |\n|---|---:|---:|---:|---:|\n${dailyRows}\n\n` +
+      `## 自定义评分规则\n\n| 规则 | 权重 | 达成率 | 加权分 |\n|---|---:|---:|---:|\n${ruleRows || "| 暂无启用规则 | 0 | 0% | 0 |"}\n\n` +
+      `## 科目进度\n\n| 科目 | 总权重 | 当前进度 |\n|---|---:|---:|\n${subjectRows}\n\n---\n由考研项目管理台生成。\n`;
+    downloadFile(markdown, `考研周报-${from}-${to}.md`, "text/markdown;charset=utf-8");
+  }
   return (
     <div className="page-stack narrow-page">
+      <div className="page-actions"><p className="muted">周报按当前启用的自定义规则实时计算。</p><button className="primary-button" onClick={exportMarkdown}><Download size={17} />导出 Markdown 周报</button></div>
       <section className="summary-strip weekly-summary">
         <div><span>近7日有效学习</span><strong>{formatMinutes(total)}</strong></div>
         <div><span>活跃天数</span><strong>{metrics.filter((item) => item.actualMinutes > 0).length} / 7</strong></div>
         <div><span>平均日得分</span><strong>{average}</strong></div>
-        <div><span>当前总进度</span><strong>{projectProgress(state.subjects)}%</strong></div>
+        <div><span>周报得分</span><strong>{summary.periodScore}</strong></div>
       </section>
       <section className="panel chart-panel">
         <div className="panel-heading"><div><p className="card-kicker">近 7 天</p><h2>有效学习时长</h2></div><span className="muted">目标线：{state.profile.dailyTargetHours}h</span></div>
@@ -910,8 +1294,9 @@ function WeeklyView({ state, metrics, average }: { state: StudyState; metrics: (
         </div>
       </section>
       <section className="panel scoring-guide">
-        <div className="panel-heading"><h2>评分规则</h2><span className="score-badge">透明可解释</span></div>
-        <div className="guide-grid"><ScoreGuide number={String(state.scoring.weights.duration)} title="有效时长" detail="按学习时间段折算后对比每日目标" /><ScoreGuide number={String(state.scoring.weights.completion)} title="任务完成" detail="按各学习时段长度加权完成度" /><ScoreGuide number={String(state.scoring.weights.focus)} title="专注质量" detail="按时长加权的1–5星专注度" /><ScoreGuide number={String(state.scoring.weights.review)} title="复盘记录" detail="有有效复盘的学习时长占比" /><ScoreGuide number={String(state.scoring.weights.timing)} title="学习时段" detail="白天及正常晚间高分，23:30后和凌晨低分" /><ScoreGuide number={String(state.scoring.weights.sleep)} title="睡眠作息" detail="每日总睡眠7–9小时得满分，过短或过长递减" /><ScoreGuide number={String(state.scoring.weights.exercise)} title="适量运动" detail="30–90分钟最佳，早晨或16:00–20:30加权更高" /></div>
+        <div className="panel-heading"><div><p className="card-kicker">实时计算</p><h2>本周规则计分</h2></div><span className="score-badge">{summary.periodScore}</span></div>
+        <div className="guide-grid">{summary.ruleResults.map((rule) => <ScoreGuide key={rule.id} number={String(Math.round(rule.points))} title={`${rule.name} · 权重 ${rule.weight}`} detail={`${rule.description}；本周达成 ${Math.round(rule.ratio * 100)}%`} />)}</div>
+        {!summary.ruleResults.length && <div className="schedule-empty">尚未启用周报规则，请前往“评分标准”新增或启用规则。</div>}
       </section>
     </div>
   );
@@ -949,6 +1334,7 @@ function ScoringView({ state, week, month, updateState }: {
   updateState: (updater: (current: StudyState) => StudyState) => void;
 }) {
   const totalWeight = Object.values(state.scoring.weights).reduce((sum, value) => sum + value, 0);
+  const totalWeeklyWeight = state.scoring.weeklyRules.filter((rule) => rule.enabled).reduce((sum, rule) => sum + rule.weight, 0);
 
   function updateWeight(key: keyof ScoreWeights, value: number) {
     updateState((current) => ({
@@ -960,11 +1346,45 @@ function ScoringView({ state, week, month, updateState }: {
     }));
   }
 
+  function updateWeeklyRule(id: string, changes: Partial<StudyState["scoring"]["weeklyRules"][number]>) {
+    updateState((current) => ({
+      ...current,
+      scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.map((rule) => rule.id === id ? { ...rule, ...changes } : rule) },
+    }));
+  }
+
+  function addWeeklyRule() {
+    updateState((current) => ({
+      ...current,
+      scoring: {
+        ...current.scoring,
+        weeklyRules: [...current.scoring.weeklyRules, { id: crypto.randomUUID(), name: "新评分规则", description: "自定义周报评价维度", metric: "studyTarget", weight: 10, enabled: true }],
+      },
+    }));
+  }
+
   return (
     <div className="page-stack scoring-page">
       <section className="period-score-grid">
         <RoutinePeriodCard title="近 7 天" subtitle="短期执行与恢复" summary={week} />
         <RoutinePeriodCard title="近 30 天" subtitle="长期稳定性" summary={month} />
+      </section>
+
+      <section className="panel settings-card">
+        <div className="panel-heading"><div><p className="card-kicker">周报模型</p><h2>自定义评分规则</h2></div><div className="heading-actions"><span className="muted">启用权重合计 {totalWeeklyWeight}</span><button className="primary-button" onClick={addWeeklyRule}><Plus size={16} />新增规则</button></div></div>
+        <p className="settings-copy">选择数据指标、设置名称与权重。系统会按所有启用规则的权重自动归一化为 100 分，新增规则会立即影响近 7 天和近 30 天得分。</p>
+        <div className="weekly-rule-list">
+          {state.scoring.weeklyRules.map((rule) => (
+            <article className={`weekly-rule-card ${rule.enabled ? "" : "disabled"}`} key={rule.id}>
+              <label className="rule-enabled"><input type="checkbox" checked={rule.enabled} onChange={(event) => updateWeeklyRule(rule.id, { enabled: event.target.checked })} /><span>启用</span></label>
+              <label><span>规则名称</span><input value={rule.name} onChange={(event) => updateWeeklyRule(rule.id, { name: event.target.value })} /></label>
+              <label><span>数据指标</span><select value={rule.metric} onChange={(event) => updateWeeklyRule(rule.id, { metric: event.target.value as WeeklyRuleMetric })}>{WEEKLY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}</select></label>
+              <label><span>权重</span><input type="number" min="0" max="100" value={rule.weight} onChange={(event) => updateWeeklyRule(rule.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
+              <label className="rule-description"><span>说明</span><input value={rule.description} onChange={(event) => updateWeeklyRule(rule.id, { description: event.target.value })} /></label>
+              <button className="rule-delete" onClick={() => window.confirm(`确定删除评分规则“${rule.name}”？`) && updateState((current) => ({ ...current, scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.filter((item) => item.id !== rule.id) } }))} aria-label="删除规则"><Trash2 size={16} /></button>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="panel standards-panel">
@@ -983,7 +1403,7 @@ function ScoringView({ state, week, month, updateState }: {
             <span>04</span><div><strong>学习：23:30 后降权</strong><p>08:00–12:00、14:00–18:00权重最高；正常晚间保持高权重；22:30 后逐步降低，23:30–05:30显著降权并计入深夜学习。</p></div>
           </article>
         </div>
-        <p className="standards-note">周期得分 = 记录日平均分 75% + 记录覆盖 10% + 作息平衡 15%。作息平衡综合睡眠达标、运动总量、娱乐时长与深夜学习占比。</p>
+        <p className="standards-note">当前周期得分由上方启用的自定义周报规则计算；作息平衡指标综合睡眠达标、运动总量、娱乐时长与深夜学习占比。</p>
       </section>
 
       <section className="panel settings-card">
@@ -1008,8 +1428,29 @@ function ScoringView({ state, week, month, updateState }: {
 }
 
 function SettingsView({ state, updateState, onExport, onImport, onReset }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void; onExport: () => void; onImport: () => void; onReset: () => void }) {
+  const [customMode, setCustomMode] = useState<"light" | "dark">("light");
   function updateProfile(key: keyof StudyState["profile"], value: string | number) {
     updateState((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
+  }
+  function updateSubject(id: string, changes: Partial<Subject>) {
+    updateState((current) => ({ ...current, subjects: current.subjects.map((subject) => subject.id === id ? { ...subject, ...changes } : subject) }));
+  }
+  function addSubject() {
+    const subject: Subject = { id: crypto.randomUUID(), name: "新考试科目", shortName: "新科目", weight: 0, accent: "#4f7ea8", note: "点击科目进度新增复习阶段", phases: [] };
+    updateState((current) => ({ ...current, subjects: [...current.subjects, subject] }));
+  }
+  function updateCustomColor(key: keyof ThemeColors, value: string) {
+    updateState((current) => ({
+      ...current,
+      appearance: {
+        ...current.appearance,
+        paletteId: "custom",
+        [customMode === "light" ? "customLight" : "customDark"]: {
+          ...(customMode === "light" ? current.appearance.customLight : current.appearance.customDark),
+          [key]: value,
+        },
+      },
+    }));
   }
   return (
     <div className="page-stack settings-page">
@@ -1029,8 +1470,28 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
         </div>
       </section>
       <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">总进度模型</p><h2>科目权重</h2></div><span className="muted">合计 {state.subjects.reduce((sum, subject) => sum + subject.weight, 0)}%</span></div>
-        <div className="weight-grid">{state.subjects.map((subject) => <label key={subject.id}><span>{subject.name}</span><div><input type="number" min="0" max="100" value={subject.weight} onChange={(e) => updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, weight: Number(e.target.value) } : item) }))} /><em>%</em></div></label>)}</div>
+        <div className="panel-heading"><div><p className="card-kicker">考试配置</p><h2>考试科目与总进度权重</h2></div><div className="heading-actions"><span className="muted">合计 {state.subjects.reduce((sum, subject) => sum + subject.weight, 0)}%</span><button className="primary-button" onClick={addSubject}><Plus size={16} />新增科目</button></div></div>
+        <div className="subject-settings-list">{state.subjects.map((subject) => <article key={subject.id}>
+          <label><span>科目名称</span><input value={subject.name} onChange={(event) => updateSubject(subject.id, { name: event.target.value })} /></label>
+          <label><span>简称</span><input value={subject.shortName} onChange={(event) => updateSubject(subject.id, { shortName: event.target.value })} /></label>
+          <label><span>权重</span><input type="number" min="0" max="100" value={subject.weight} onChange={(event) => updateSubject(subject.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
+          <label><span>科目颜色</span><input type="color" value={subject.accent} onChange={(event) => updateSubject(subject.id, { accent: event.target.value })} /></label>
+          <label className="subject-note-field"><span>科目说明</span><input value={subject.note} onChange={(event) => updateSubject(subject.id, { note: event.target.value })} /></label>
+          <button onClick={() => window.confirm(`确定删除考试科目“${subject.name}”？对应阶段会一起删除，已有时间记录不会自动删除。`) && updateState((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id) }))} aria-label="删除科目"><Trash2 size={16} /></button>
+        </article>)}</div>
+      </section>
+      <section className="panel settings-card appearance-settings">
+        <div className="panel-heading"><div><p className="card-kicker">视觉外观</p><h2>页面配色方案</h2></div><Palette size={20} /></div>
+        <p className="settings-copy">六套方案均分别设计了亮色与暗色版本，侧栏的模式开关会自动使用对应配色。也可以进入自定义调色盘逐项调整。</p>
+        <div className="palette-grid">
+          {THEME_PALETTES.map((palette) => <button className={state.appearance.paletteId === palette.id ? "active" : ""} key={palette.id} onClick={() => updateState((current) => ({ ...current, appearance: { ...current.appearance, paletteId: palette.id } }))}><span className="palette-swatches"><i style={{ background: palette.light.primary }} /><i style={{ background: palette.light.accent }} /><i style={{ background: palette.dark.bg }} /><i style={{ background: palette.dark.accent }} /></span><strong>{palette.name}</strong><small>{palette.description}</small></button>)}
+          <button className={state.appearance.paletteId === "custom" ? "active custom" : "custom"} onClick={() => updateState((current) => ({ ...current, appearance: { ...current.appearance, paletteId: "custom" } }))}><span className="palette-swatches custom-wheel"><Palette size={22} /></span><strong>自定义调色盘</strong><small>独立调节亮色与暗色的全部关键颜色</small></button>
+        </div>
+        {state.appearance.paletteId === "custom" && <div className="custom-palette-editor">
+          <div className="mode-tabs"><button className={customMode === "light" ? "active" : ""} onClick={() => setCustomMode("light")}><Sun size={15} />亮色配色</button><button className={customMode === "dark" ? "active" : ""} onClick={() => setCustomMode("dark")}><Moon size={15} />暗色配色</button></div>
+          <div className="color-picker-grid">{COLOR_FIELDS.map((field) => { const colors = customMode === "light" ? state.appearance.customLight : state.appearance.customDark; return <label key={field.key}><span>{field.label}</span><div><input type="color" value={colors[field.key]} onChange={(event) => updateCustomColor(field.key, event.target.value)} /><code>{colors[field.key]}</code></div></label>; })}</div>
+          <div className="button-row"><button className="secondary-button" onClick={() => updateState((current) => ({ ...current, appearance: { ...defaultStudyState.appearance, paletteId: "custom" } }))}><RotateCcw size={16} />重置自定义配色</button></div>
+        </div>}
       </section>
       <section className="panel settings-card">
         <div className="panel-heading"><div><p className="card-kicker">数据管理</p><h2>本机存储与备份</h2></div><HardDrive size={19} /></div>
@@ -1141,23 +1602,50 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
   );
 }
 
+function PlanItemDialog({ state, onClose, onSave }: { state: StudyState; onClose: () => void; onSave: (item: PlanItem) => void }) {
+  const [form, setForm] = useState({ start: "08:00", end: "10:00", subjectId: state.subjects[0]?.id ?? "math", task: "", note: "" });
+  const duration = minutesBetween(form.start, form.end, form.subjectId === "sleep");
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!form.task.trim() || duration <= 0) return;
+    onSave({ id: crypto.randomUUID(), ...form, task: form.task.trim() });
+  }
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form className="record-dialog" onSubmit={submit}>
+        <div className="dialog-heading"><div><p className="card-kicker">今日计划</p><h2>安排一个计划时段</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-grid">
+          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
+          <label><span>计划任务</span><input autoFocus value={form.task} placeholder="例如：高数基础讲义第 3 章" onChange={(event) => setForm({ ...form, task: event.target.value })} /></label>
+          <label><span>开始时间</span><input type="time" value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label>
+          <label><span>结束时间</span><input type="time" value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label>
+          <label className="wide"><span>计划备注（可选）</span><textarea value={form.note} placeholder="目标章节、题量或完成标准" onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
+        </div>
+        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || duration <= 0}><Save size={16} />保存计划</button></div></div>
+      </form>
+    </div>
+  );
+}
+
 function SessionTable({ sessions, state, onDelete }: { sessions: StudySession[]; state: StudyState; onDelete: (id: string) => void }) {
   return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
-function DayScheduleChart({ sessions, state, mode }: {
-  sessions: StudySession[];
+function DayScheduleChart({ entries, state, mode }: {
+  entries: (StudySession | PlanItem)[];
   state: StudyState;
   mode: "planned" | "actual";
 }) {
-  const durationFor = (session: StudySession) => {
-    const stored = mode === "planned" ? session.plannedMinutes : session.actualMinutes;
-    return Math.min(24 * 60, Math.max(0, Number(stored) || minutesBetween(session.start, session.end, session.subjectId === "sleep")));
+  const durationFor = (entry: StudySession | PlanItem) => {
+    const stored = mode === "planned"
+      ? "plannedMinutes" in entry ? entry.plannedMinutes : minutesBetween(entry.start, entry.end, entry.subjectId === "sleep")
+      : "actualMinutes" in entry ? entry.actualMinutes : minutesBetween(entry.start, entry.end, entry.subjectId === "sleep");
+    return Math.min(24 * 60, Math.max(0, Number(stored) || minutesBetween(entry.start, entry.end, entry.subjectId === "sleep")));
   };
-  const chartSessions = sessions.filter((session) => durationFor(session) > 0);
+  const chartEntries = entries.filter((entry) => durationFor(entry) > 0);
   const hours = [0, 6, 12, 18, 24];
 
-  if (!chartSessions.length) {
+  if (!chartEntries.length) {
     return <div className="schedule-empty">暂无可生成图表的时段，新增记录后会自动绘制。</div>;
   }
 
@@ -1165,20 +1653,20 @@ function DayScheduleChart({ sessions, state, mode }: {
     <div className="day-schedule" aria-label={mode === "planned" ? "今日计划安排图" : "实际时间记录图"}>
       <div className="schedule-axis-label" />
       <div className="schedule-axis">{hours.map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
-      {chartSessions.map((session) => {
-        const subject = state.subjects.find((item) => item.id === session.subjectId);
-        const activity = lifeActivity(session.subjectId);
-        const duration = durationFor(session);
-        const start = timeToMinutes(session.start);
+      {chartEntries.map((entry) => {
+        const subject = state.subjects.find((item) => item.id === entry.subjectId);
+        const activity = lifeActivity(entry.subjectId);
+        const duration = durationFor(entry);
+        const start = timeToMinutes(entry.start);
         const firstDuration = Math.min(duration, 24 * 60 - start);
         const wrappedDuration = Math.max(0, duration - firstDuration);
         const end = (start + duration) % (24 * 60);
         const endLabel = minutesToTime(end);
         const color = subject?.accent ?? activity?.accent ?? "var(--accent)";
-        const title = `${session.task} · ${session.start}–${endLabel} · ${formatMinutes(duration)}`;
+        const title = `${entry.task} · ${entry.start}–${endLabel} · ${formatMinutes(duration)}`;
         return (
-          <div className="schedule-row" key={session.id}>
-            <div className="schedule-row-label"><strong>{session.task}</strong><span>{session.start}–{endLabel}</span></div>
+          <div className="schedule-row" key={entry.id}>
+            <div className="schedule-row-label"><strong>{entry.task}</strong><span>{entry.start}–{endLabel}</span></div>
             <div className="schedule-track">
               {hours.map((hour) => <i className="schedule-gridline" key={hour} style={{ left: `${hour / 24 * 100}%` }} />)}
               <span className="schedule-block" title={title} style={{ left: `${start / (24 * 60) * 100}%`, width: `${firstDuration / (24 * 60) * 100}%`, background: color }} />
@@ -1190,6 +1678,10 @@ function DayScheduleChart({ sessions, state, mode }: {
       <div className="schedule-legend"><span><i />{mode === "planned" ? "计划时段" : "实际记录"}</span><small>横轴为 00:00–24:00，悬停色块可查看详情</small></div>
     </div>
   );
+}
+
+function PlanTable({ items, state, onDelete }: { items: PlanItem[]; state: StudyState; onDelete: (id: string) => void }) {
+  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
 function ProgressRing({ value, label, compact = false, color }: { value: number; label?: string; compact?: boolean; color?: string }) {
