@@ -437,6 +437,10 @@ export default function Dashboard() {
         if (parsed.version === 1 && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
           const normalized: StudyState = {
             ...parsed,
+            profile: {
+              ...defaultStudyState.profile,
+              ...parsed.profile,
+            },
             scoring: {
               weights: {
                 ...defaultStudyState.scoring.weights,
@@ -632,7 +636,7 @@ export default function Dashboard() {
       <aside className={`sidebar ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="brand-block">
           <div className="brand-mark">Z</div>
-          <div><strong>浙研 2027</strong><span>电气专硕 · 项目管理台</span></div>
+          <div><strong>{state.profile.sidebarTitle}</strong><span>{state.profile.sidebarSubtitle}</span></div>
         </div>
         <nav className="nav-list" aria-label="主要导航">
           {NAV.map((item) => {
@@ -659,8 +663,8 @@ export default function Dashboard() {
             {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
             <span>{theme === "light" ? "切换至暗色模式" : "切换至亮色模式"}</span>
           </button>
-          <div className="mini-target"><Target size={18} /><div><span>目标</span><strong>浙江大学</strong></div></div>
-          <p>电气工程专硕 · 数一 / 英一 / 840</p>
+          <div className="mini-target"><Target size={18} /><div><span>目标</span><strong>{state.profile.targetSchool}</strong></div></div>
+          <p>{state.profile.targetDescription}</p>
         </div>
       </aside>
 
@@ -822,6 +826,10 @@ function TodayView({ state, sessions, metrics, onRecord, onDelete }: { state: St
         <div><span>今日得分</span><strong>{metrics.score}</strong></div>
         <button className="primary-button" onClick={onRecord}><Plus size={17} />新增时段</button>
       </section>
+      <section className="panel schedule-panel">
+        <div className="panel-heading"><div><p className="card-kicker">{localDate()}</p><h2>今日计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
+        <DayScheduleChart sessions={sessions} state={state} mode="planned" />
+      </section>
       <section className="panel">
         <div className="panel-heading"><div><p className="card-kicker">{localDate()}</p><h2>今天的分时记录</h2></div><span className="muted">目标 {state.profile.dailyTargetHours} 小时</span></div>
         {sessions.length ? <SessionTable sessions={sessions} state={state} onDelete={onDelete} /> : <EmptyState icon={Clock3} title="把一天拆成真实时段" detail="建议每段 45–150 分钟，完成后立即填写完成度和专注度。" action="记录第一个时段" onAction={onRecord} />}
@@ -837,7 +845,9 @@ function RecordsView({ state, onRecord, onDelete }: { state: StudyState; onRecor
       <div className="page-actions"><p className="muted">共 {state.sessions.length} 条记录 · 当前浏览器本地保存</p><button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button></div>
       {dates.length ? dates.map((date) => (
         <section className="panel" key={date}>
-          <div className="panel-heading"><h2>{date}</h2><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
+          <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
+          <DayScheduleChart sessions={sessionsForDate(state.sessions, date)} state={state} mode="actual" />
+          <div className="schedule-table-divider" />
           <SessionTable sessions={sessionsForDate(state.sessions, date)} state={state} onDelete={onDelete} />
         </section>
       )) : <section className="panel"><EmptyState icon={Clock3} title="记录会按日期沉淀在这里" detail="完成第一条记录后，可在这里查看全部历史。" action="新增记录" onAction={onRecord} /></section>}
@@ -1008,6 +1018,10 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
         <div className="form-grid">
           <label><span>称呼</span><input value={state.profile.name} onChange={(e) => updateProfile("name", e.target.value)} /></label>
           <label className="wide"><span>目标项目</span><input value={state.profile.target} onChange={(e) => updateProfile("target", e.target.value)} /></label>
+          <label><span>侧栏主标题</span><input value={state.profile.sidebarTitle} onChange={(e) => updateProfile("sidebarTitle", e.target.value)} /></label>
+          <label className="wide"><span>侧栏副标题</span><input value={state.profile.sidebarSubtitle} onChange={(e) => updateProfile("sidebarSubtitle", e.target.value)} /></label>
+          <label><span>目标院校</span><input value={state.profile.targetSchool} onChange={(e) => updateProfile("targetSchool", e.target.value)} /></label>
+          <label className="wide"><span>目标说明</span><input value={state.profile.targetDescription} onChange={(e) => updateProfile("targetDescription", e.target.value)} /></label>
           <label><span>暂定初试日期</span><input type="date" value={state.profile.examDate} onChange={(e) => updateProfile("examDate", e.target.value)} /></label>
           <label><span>每日目标小时</span><input type="number" min="1" max="16" step="0.5" value={state.profile.dailyTargetHours} onChange={(e) => updateProfile("dailyTargetHours", Number(e.target.value))} /></label>
           <label><span>目标起床</span><input type="time" value={state.profile.wakeTime} onChange={(e) => updateProfile("wakeTime", e.target.value)} /></label>
@@ -1129,6 +1143,53 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
 
 function SessionTable({ sessions, state, onDelete }: { sessions: StudySession[]; state: StudyState; onDelete: (id: string) => void }) {
   return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
+}
+
+function DayScheduleChart({ sessions, state, mode }: {
+  sessions: StudySession[];
+  state: StudyState;
+  mode: "planned" | "actual";
+}) {
+  const durationFor = (session: StudySession) => {
+    const stored = mode === "planned" ? session.plannedMinutes : session.actualMinutes;
+    return Math.min(24 * 60, Math.max(0, Number(stored) || minutesBetween(session.start, session.end, session.subjectId === "sleep")));
+  };
+  const chartSessions = sessions.filter((session) => durationFor(session) > 0);
+  const hours = [0, 6, 12, 18, 24];
+
+  if (!chartSessions.length) {
+    return <div className="schedule-empty">暂无可生成图表的时段，新增记录后会自动绘制。</div>;
+  }
+
+  return (
+    <div className="day-schedule" aria-label={mode === "planned" ? "今日计划安排图" : "实际时间记录图"}>
+      <div className="schedule-axis-label" />
+      <div className="schedule-axis">{hours.map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
+      {chartSessions.map((session) => {
+        const subject = state.subjects.find((item) => item.id === session.subjectId);
+        const activity = lifeActivity(session.subjectId);
+        const duration = durationFor(session);
+        const start = timeToMinutes(session.start);
+        const firstDuration = Math.min(duration, 24 * 60 - start);
+        const wrappedDuration = Math.max(0, duration - firstDuration);
+        const end = (start + duration) % (24 * 60);
+        const endLabel = minutesToTime(end);
+        const color = subject?.accent ?? activity?.accent ?? "var(--accent)";
+        const title = `${session.task} · ${session.start}–${endLabel} · ${formatMinutes(duration)}`;
+        return (
+          <div className="schedule-row" key={session.id}>
+            <div className="schedule-row-label"><strong>{session.task}</strong><span>{session.start}–{endLabel}</span></div>
+            <div className="schedule-track">
+              {hours.map((hour) => <i className="schedule-gridline" key={hour} style={{ left: `${hour / 24 * 100}%` }} />)}
+              <span className="schedule-block" title={title} style={{ left: `${start / (24 * 60) * 100}%`, width: `${firstDuration / (24 * 60) * 100}%`, background: color }} />
+              {wrappedDuration > 0 && <span className="schedule-block" title={title} style={{ left: 0, width: `${wrappedDuration / (24 * 60) * 100}%`, background: color }} />}
+            </div>
+          </div>
+        );
+      })}
+      <div className="schedule-legend"><span><i />{mode === "planned" ? "计划时段" : "实际记录"}</span><small>横轴为 00:00–24:00，悬停色块可查看详情</small></div>
+    </div>
+  );
 }
 
 function ProgressRing({ value, label, compact = false, color }: { value: number; label?: string; compact?: boolean; color?: string }) {
