@@ -1,4 +1,4 @@
-mport {
+import {
   BarChart3,
   BookOpen,
   CalendarDays,
