@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Save,
   Settings,
+  SlidersHorizontal,
   Sun,
   Target,
   TimerReset,
@@ -27,11 +28,12 @@ import {
   defaultStudyState,
   projectProgress,
   subjectProgress,
+  type ScoreWeights,
   type StudySession,
   type StudyState,
 } from "./study-state";
 
-type View = "overview" | "today" | "records" | "subjects" | "weekly" | "settings";
+type View = "overview" | "today" | "records" | "subjects" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
 type DateRange = { from: string; to: string };
@@ -43,7 +45,18 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "records", label: "时间记录", icon: Clock3 },
   { id: "subjects", label: "科目进度", icon: BookOpen },
   { id: "weekly", label: "周报", icon: BarChart3 },
+  { id: "scoring", label: "评分标准", icon: SlidersHorizontal },
   { id: "settings", label: "设置", icon: Settings },
+];
+
+const SCORE_WEIGHT_FIELDS: { key: keyof ScoreWeights; label: string; detail: string }[] = [
+  { key: "duration", label: "有效时长", detail: "按作息折算后的学习时长" },
+  { key: "completion", label: "任务完成", detail: "按时长加权的完成度" },
+  { key: "focus", label: "专注质量", detail: "按时长加权的专注度" },
+  { key: "review", label: "复盘记录", detail: "有效复盘覆盖比例" },
+  { key: "timing", label: "学习时段", detail: "健康学习时段占比" },
+  { key: "sleep", label: "睡眠作息", detail: "7–9 小时为满分区间" },
+  { key: "exercise", label: "运动安排", detail: "时长与时段综合评价" },
 ];
 
 const LOCAL_KEY = "kaoyan-dashboard-state-v1";
@@ -185,35 +198,213 @@ function daysUntil(date: string) {
   return Math.max(0, Math.ceil((target.getTime() - Date.now()) / 86_400_000));
 }
 
-function dailyMetrics(sessions: StudySession[], targetHours: number) {
+function clampRatio(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function studyTimeWeight(minute: number) {
+  if (minute < 5 * 60 + 30) return 0.15;
+  if (minute < 8 * 60) return 0.9;
+  if (minute < 12 * 60) return 1.05;
+  if (minute < 14 * 60) return 0.85;
+  if (minute < 18 * 60) return 1.05;
+  if (minute < 22 * 60 + 30) return 1;
+  if (minute < 23 * 60 + 30) return 0.7;
+  return 0.3;
+}
+
+function exerciseTimeWeight(minute: number) {
+  const morning = minute >= 6 * 60 && minute < 9 * 60;
+  const afternoon = minute >= 16 * 60 && minute < 20 * 60 + 30;
+  if (morning || afternoon) return 1;
+  if (
+    (minute >= 9 * 60 && minute < 11 * 60 + 30) ||
+    (minute >= 14 * 60 && minute < 16 * 60)
+  ) return 0.75;
+  if (minute >= 20 * 60 + 30 && minute < 22 * 60) return 0.6;
+  if (minute >= 23 * 60 + 30 || minute < 5 * 60 + 30) return 0;
+  return 0.35;
+}
+
+function sessionTimeWeight(session: StudySession, weightAt: (minute: number) => number) {
+  const duration = Math.min(24 * 60, Math.max(0, Math.round(session.actualMinutes)));
+  if (!duration) return 0;
+  const start = timeToMinutes(session.start);
+  let total = 0;
+  for (let offset = 0; offset < duration; offset += 1) {
+    total += weightAt((start + offset) % (24 * 60));
+  }
+  return total / duration;
+}
+
+function sleepQualityRatio(minutes: number) {
+  if (minutes >= 7 * 60 && minutes <= 9 * 60) return 1;
+  if (minutes < 7 * 60) return clampRatio((minutes - 5 * 60) / (2 * 60));
+  return clampRatio((11 * 60 - minutes) / (2 * 60));
+}
+
+function sessionMinutesMatching(session: StudySession, matches: (minute: number) => boolean) {
+  const duration = Math.min(24 * 60, Math.max(0, Math.round(session.actualMinutes)));
+  const start = timeToMinutes(session.start);
+  let total = 0;
+  for (let offset = 0; offset < duration; offset += 1) {
+    if (matches((start + offset) % (24 * 60))) total += 1;
+  }
+  return total;
+}
+
+function dailyMetrics(sessions: StudySession[], targetHours: number, weights: ScoreWeights) {
   const studySessions = sessions.filter((item) => !LIFE_ACTIVITY_IDS.has(item.subjectId));
+  const sleepSessions = sessions.filter((item) => item.subjectId === "sleep");
+  const exerciseSessions = sessions.filter((item) => item.subjectId === "exercise");
   const actualMinutes = studySessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const completion = studySessions.length
-    ? studySessions.reduce((sum, item) => sum + item.completion, 0) / studySessions.length
-    : 0;
-  const focus = studySessions.length
-    ? studySessions.reduce((sum, item) => sum + item.focus, 0) / studySessions.length
-    : 0;
-  const review = studySessions.length
-    ? studySessions.filter((item) => item.note.trim().length >= 6).length / studySessions.length
-    : 0;
-  const hourRatio = Math.min(1, actualMinutes / Math.max(1, targetHours * 60));
-  const score = Math.round(
-    hourRatio * 40 + (completion / 100) * 30 + (focus / 5) * 20 + review * 10,
+  const weightedStudyMinutes = studySessions.reduce(
+    (sum, item) => sum + item.actualMinutes * sessionTimeWeight(item, studyTimeWeight),
+    0,
   );
-  return { actualMinutes, completion, focus, review, score, hourRatio };
+  const completion = actualMinutes
+    ? studySessions.reduce((sum, item) => sum + item.completion * item.actualMinutes, 0) /
+      actualMinutes
+    : 0;
+  const focus = actualMinutes
+    ? studySessions.reduce((sum, item) => sum + item.focus * item.actualMinutes, 0) /
+      actualMinutes
+    : 0;
+  const review = actualMinutes
+    ? studySessions.reduce(
+        (sum, item) => sum + (item.note.trim().length >= 6 ? item.actualMinutes : 0),
+        0,
+      ) / actualMinutes
+    : 0;
+  const hourRatio = clampRatio(weightedStudyMinutes / Math.max(1, targetHours * 60));
+  const timingRatio = actualMinutes ? clampRatio(weightedStudyMinutes / actualMinutes) : 0;
+  const sleepMinutes = sleepSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
+  const exerciseMinutes = exerciseSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
+  const entertainmentMinutes = sessions
+    .filter((item) => item.subjectId === "entertainment")
+    .reduce((sum, item) => sum + item.actualMinutes, 0);
+  const lateStudyMinutes = studySessions.reduce(
+    (sum, item) => sum + sessionMinutesMatching(
+      item,
+      (minute) => minute >= 23 * 60 + 30 || minute < 5 * 60 + 30,
+    ),
+    0,
+  );
+  const exerciseTimingRatio = exerciseMinutes
+    ? exerciseSessions.reduce(
+        (sum, item) => sum + item.actualMinutes * sessionTimeWeight(item, exerciseTimeWeight),
+        0,
+      ) / exerciseMinutes
+    : 0;
+  const exerciseDurationRatio = exerciseMinutes < 30
+    ? exerciseMinutes / 30
+    : exerciseMinutes <= 90
+      ? 1
+      : Math.max(0.7, 1 - (exerciseMinutes - 90) / 200);
+  const componentRatios = {
+    duration: hourRatio,
+    completion: completion / 100,
+    focus: focus / 5,
+    review,
+    timing: timingRatio,
+    sleep: sleepQualityRatio(sleepMinutes),
+    exercise: exerciseDurationRatio * (0.7 + exerciseTimingRatio * 0.3),
+  };
+  const scoreParts = {
+    duration: componentRatios.duration * Math.max(0, weights.duration),
+    completion: componentRatios.completion * Math.max(0, weights.completion),
+    focus: componentRatios.focus * Math.max(0, weights.focus),
+    review: componentRatios.review * Math.max(0, weights.review),
+    timing: componentRatios.timing * Math.max(0, weights.timing),
+    sleep: componentRatios.sleep * Math.max(0, weights.sleep),
+    exercise: componentRatios.exercise * Math.max(0, weights.exercise),
+  };
+  const totalWeight = Object.values(weights).reduce((sum, value) => sum + Math.max(0, value), 0) || 1;
+  const score = Math.round(
+    Object.values(scoreParts).reduce((sum, value) => sum + value, 0) / totalWeight * 100,
+  );
+  return {
+    actualMinutes,
+    weightedStudyMinutes,
+    completion,
+    focus,
+    review,
+    timingRatio,
+    sleepMinutes,
+    exerciseMinutes,
+    entertainmentMinutes,
+    lateStudyMinutes,
+    scoreParts,
+    score,
+    hourRatio,
+    hasRecords: sessions.length > 0,
+  };
 }
 
 function sessionsForDate(sessions: StudySession[], date: string) {
   return sessions.filter((item) => item.date === date).sort((a, b) => a.start.localeCompare(b.start));
 }
 
-function lastSevenDays() {
-  return Array.from({ length: 7 }, (_, index) => {
+function recentDates(days: number) {
+  return Array.from({ length: days }, (_, index) => {
     const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
+    date.setDate(date.getDate() - (days - 1 - index));
     return localDate(date);
   });
+}
+
+function periodSummary(
+  sessions: StudySession[],
+  dates: string[],
+  targetHours: number,
+  weights: ScoreWeights,
+) {
+  const days = dates.map((date) => dailyMetrics(sessionsForDate(sessions, date), targetHours, weights));
+  const recordedDays = days.filter((item) => item.hasRecords);
+  const sleepDays = days.filter((item) => item.sleepMinutes > 0);
+  const averageDailyScore = recordedDays.length
+    ? recordedDays.reduce((sum, item) => sum + item.score, 0) / recordedDays.length
+    : 0;
+  const recordRate = recordedDays.length / Math.max(1, dates.length);
+  const healthySleepRate = sleepDays.length
+    ? sleepDays.filter((item) => item.sleepMinutes >= 7 * 60 && item.sleepMinutes <= 9 * 60).length /
+      sleepDays.length
+    : 0;
+  const exerciseMinutes = days.reduce((sum, item) => sum + item.exerciseMinutes, 0);
+  const exerciseTarget = dates.length / 7 * 150;
+  const averageEntertainmentMinutes = Math.round(
+    days.reduce((sum, item) => sum + item.entertainmentMinutes, 0) / Math.max(1, dates.length),
+  );
+  const totalStudyMinutes = days.reduce((sum, item) => sum + item.actualMinutes, 0);
+  const lateStudyMinutes = days.reduce((sum, item) => sum + item.lateStudyMinutes, 0);
+  const entertainmentBalance = averageEntertainmentMinutes <= 120
+    ? 1
+    : clampRatio((240 - averageEntertainmentMinutes) / 120);
+  const lateStudyBalance = totalStudyMinutes
+    ? clampRatio(1 - lateStudyMinutes / totalStudyMinutes)
+    : 0;
+  const routineBalance =
+    healthySleepRate * 0.4 +
+    clampRatio(exerciseMinutes / Math.max(1, exerciseTarget)) * 0.3 +
+    entertainmentBalance * 0.15 +
+    lateStudyBalance * 0.15;
+  return {
+    days: dates.length,
+    periodScore: Math.round(averageDailyScore * 0.75 + recordRate * 10 + routineBalance * 15),
+    averageDailyScore: Math.round(averageDailyScore),
+    recordRate,
+    averageSleepMinutes: sleepDays.length
+      ? Math.round(sleepDays.reduce((sum, item) => sum + item.sleepMinutes, 0) / sleepDays.length)
+      : 0,
+    healthySleepRate,
+    exerciseMinutes,
+    exerciseTarget: Math.round(exerciseTarget),
+    exerciseDays: days.filter((item) => item.exerciseMinutes >= 20).length,
+    averageEntertainmentMinutes,
+    totalStudyMinutes,
+    lateStudyMinutes,
+    routineBalance,
+  };
 }
 
 export default function Dashboard() {
@@ -244,12 +435,21 @@ export default function Dashboard() {
       try {
         const parsed = JSON.parse(local) as StudyState;
         if (parsed.version === 1 && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
-          const savedEnglish = parsed.subjects.find((subject) => subject.id === "english");
+          const normalized: StudyState = {
+            ...parsed,
+            scoring: {
+              weights: {
+                ...defaultStudyState.scoring.weights,
+                ...parsed.scoring?.weights,
+              },
+            },
+          };
+          const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
           const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
           const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
             ["eng-word", "eng-read", "eng-other", "eng-write"].includes(phase.id),
           );
-          const savedCircuit = parsed.subjects.find((subject) => subject.id === "circuit");
+          const savedCircuit = normalized.subjects.find((subject) => subject.id === "circuit");
           const defaultCircuit = defaultStudyState.subjects.find((subject) => subject.id === "circuit");
           const hasLegacyCircuitPlan = savedCircuit?.phases.some((phase) =>
             ["cir-basic", "cir-exercise", "cir-mock"].includes(phase.id),
@@ -275,8 +475,8 @@ export default function Dashboard() {
               "cir-material": "cir-mock",
             };
             setState({
-              ...parsed,
-              subjects: parsed.subjects.map((subject) =>
+              ...normalized,
+              subjects: normalized.subjects.map((subject) =>
                 subject.id === "english" && savedEnglish && defaultEnglish && hasLegacyEnglishPlan
                   ? {
                       ...subject,
@@ -301,7 +501,7 @@ export default function Dashboard() {
               ),
             });
           } else {
-            setState(parsed);
+            setState(normalized);
           }
         }
       } catch {
@@ -325,26 +525,41 @@ export default function Dashboard() {
   const today = localDate();
   const todaySessions = useMemo(() => sessionsForDate(state.sessions, today), [state.sessions, today]);
   const todayMetrics = useMemo(
-    () => dailyMetrics(todaySessions, state.profile.dailyTargetHours),
-    [todaySessions, state.profile.dailyTargetHours],
+    () => dailyMetrics(todaySessions, state.profile.dailyTargetHours, state.scoring.weights),
+    [todaySessions, state.profile.dailyTargetHours, state.scoring.weights],
   );
   const progress = useMemo(() => projectProgress(state.subjects), [state.subjects]);
-  const sevenDates = lastSevenDays();
+  const sevenDates = useMemo(() => recentDates(7), [today]);
+  const thirtyDates = useMemo(() => recentDates(30), [today]);
   const weekMetrics = useMemo(
     () =>
       sevenDates.map((date) => ({
         date,
-        ...dailyMetrics(sessionsForDate(state.sessions, date), state.profile.dailyTargetHours),
+        ...dailyMetrics(
+          sessionsForDate(state.sessions, date),
+          state.profile.dailyTargetHours,
+          state.scoring.weights,
+        ),
       })),
-    [sevenDates, state.sessions, state.profile.dailyTargetHours],
+    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
   );
-  const activeDays = weekMetrics.filter((item) => item.actualMinutes > 0);
+  const weekSummary = useMemo(
+    () => periodSummary(state.sessions, sevenDates, state.profile.dailyTargetHours, state.scoring.weights),
+    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
+  );
+  const monthSummary = useMemo(
+    () => periodSummary(state.sessions, thirtyDates, state.profile.dailyTargetHours, state.scoring.weights),
+    [thirtyDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
+  );
+  const activeDays = weekMetrics.filter((item) => item.hasRecords);
   const weeklyAverage = activeDays.length
     ? Math.round(activeDays.reduce((sum, item) => sum + item.score, 0) / activeDays.length)
     : 0;
   const startedSubjects = state.subjects.filter((subject) => subjectProgress(subject) > 0).length;
   const balanceScore = Math.round((startedSubjects / state.subjects.length) * 100);
-  const projectScore = Math.round(progress * 0.55 + weeklyAverage * 0.3 + balanceScore * 0.15);
+  const projectScore = Math.round(
+    progress * 0.5 + weekSummary.periodScore * 0.25 + monthSummary.periodScore * 0.1 + balanceScore * 0.15,
+  );
 
   function toggleTheme() {
     const next = theme === "light" ? "dark" : "light";
@@ -484,6 +699,14 @@ export default function Dashboard() {
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
         {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} />}
+        {view === "scoring" && (
+          <ScoringView
+            state={state}
+            week={weekSummary}
+            month={monthSummary}
+            updateState={updateState}
+          />
+        )}
         {view === "settings" && (
           <SettingsView
             state={state}
@@ -528,7 +751,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
       <section className="countdown-line"><CalendarDays size={19} /><span>距离暂定初试日期</span><strong>{days}</strong><span>天</span></section>
       <section className="hero-grid">
         <article className="metric-card score-card">
-          <div><p className="card-kicker">今日得分</p><strong className="mega-number">{metrics.score}</strong><p className="muted">按有效时长、完成度、专注度和复盘计算</p></div>
+          <div><p className="card-kicker">今日得分</p><strong className="mega-number">{metrics.score}</strong><p className="muted">综合学习质量、学习时段、睡眠和运动计算</p></div>
           <ProgressRing value={metrics.score} label="/ 100" />
         </article>
         <article className="metric-card hours-card">
@@ -567,7 +790,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
           <ScoreRow label="考研总进度" value={progress} max={100} />
           <ScoreRow label="今日执行" value={metrics.score} max={100} />
           <ScoreRow label="科目启动" value={state.subjects.filter((s) => subjectProgress(s) > 0).length} max={state.subjects.length} />
-          <div className="formula-note"><CircleGauge size={16} />总评分 = 总进度 55% + 近7日执行 30% + 科目均衡 15%</div>
+          <div className="formula-note"><CircleGauge size={16} />总评分 = 总进度 50% + 近7日 25% + 近30日 10% + 科目均衡 15%</div>
         </article>
       </section>
 
@@ -590,10 +813,12 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
 function TodayView({ state, sessions, metrics, onRecord, onDelete }: { state: StudyState; sessions: StudySession[]; metrics: ReturnType<typeof dailyMetrics>; onRecord: () => void; onDelete: (id: string) => void }) {
   return (
     <div className="page-stack narrow-page">
-      <section className="summary-strip">
+      <section className="summary-strip today-summary">
         <div><span>今日有效学习</span><strong>{formatMinutes(metrics.actualMinutes)}</strong></div>
+        <div><span>作息效率</span><strong>{Math.round(metrics.timingRatio * 100)}%</strong></div>
+        <div><span>睡眠</span><strong>{formatMinutes(metrics.sleepMinutes)}</strong></div>
+        <div><span>运动</span><strong>{formatMinutes(metrics.exerciseMinutes)}</strong></div>
         <div><span>平均完成度</span><strong>{Math.round(metrics.completion)}%</strong></div>
-        <div><span>平均专注度</span><strong>{metrics.focus.toFixed(1)} / 5</strong></div>
         <div><span>今日得分</span><strong>{metrics.score}</strong></div>
         <button className="primary-button" onClick={onRecord}><Plus size={17} />新增时段</button>
       </section>
@@ -676,7 +901,97 @@ function WeeklyView({ state, metrics, average }: { state: StudyState; metrics: (
       </section>
       <section className="panel scoring-guide">
         <div className="panel-heading"><h2>评分规则</h2><span className="score-badge">透明可解释</span></div>
-        <div className="guide-grid"><ScoreGuide number="40" title="有效时长" detail="实际时长 ÷ 每日目标，上限40分" /><ScoreGuide number="30" title="任务完成" detail="各时段完成度的平均值" /><ScoreGuide number="20" title="专注质量" detail="每段1–5星的平均值" /><ScoreGuide number="10" title="复盘记录" detail="有有效复盘的时段占比" /></div>
+        <div className="guide-grid"><ScoreGuide number={String(state.scoring.weights.duration)} title="有效时长" detail="按学习时间段折算后对比每日目标" /><ScoreGuide number={String(state.scoring.weights.completion)} title="任务完成" detail="按各学习时段长度加权完成度" /><ScoreGuide number={String(state.scoring.weights.focus)} title="专注质量" detail="按时长加权的1–5星专注度" /><ScoreGuide number={String(state.scoring.weights.review)} title="复盘记录" detail="有有效复盘的学习时长占比" /><ScoreGuide number={String(state.scoring.weights.timing)} title="学习时段" detail="白天及正常晚间高分，23:30后和凌晨低分" /><ScoreGuide number={String(state.scoring.weights.sleep)} title="睡眠作息" detail="每日总睡眠7–9小时得满分，过短或过长递减" /><ScoreGuide number={String(state.scoring.weights.exercise)} title="适量运动" detail="30–90分钟最佳，早晨或16:00–20:30加权更高" /></div>
+      </section>
+    </div>
+  );
+}
+
+function RoutinePeriodCard({ title, subtitle, summary }: {
+  title: string;
+  subtitle: string;
+  summary: ReturnType<typeof periodSummary>;
+}) {
+  return (
+    <article className="panel routine-period-card">
+      <div className="panel-heading">
+        <div><p className="card-kicker">{subtitle}</p><h2>{title}</h2></div>
+        <ProgressRing value={summary.periodScore} compact />
+      </div>
+      <div className="routine-metric-grid">
+        <div><span>记录覆盖</span><strong>{Math.round(summary.recordRate * 100)}%</strong></div>
+        <div><span>平均日得分</span><strong>{summary.averageDailyScore}</strong></div>
+        <div><span>平均睡眠</span><strong>{formatMinutes(summary.averageSleepMinutes)}</strong></div>
+        <div><span>达标睡眠</span><strong>{Math.round(summary.healthySleepRate * 100)}%</strong></div>
+        <div><span>运动累计</span><strong>{formatMinutes(summary.exerciseMinutes)}</strong></div>
+        <div><span>日均娱乐</span><strong>{formatMinutes(summary.averageEntertainmentMinutes)}</strong></div>
+        <div><span>深夜学习</span><strong>{formatMinutes(summary.lateStudyMinutes)}</strong></div>
+        <div><span>作息平衡</span><strong>{Math.round(summary.routineBalance * 100)}%</strong></div>
+      </div>
+    </article>
+  );
+}
+
+function ScoringView({ state, week, month, updateState }: {
+  state: StudyState;
+  week: ReturnType<typeof periodSummary>;
+  month: ReturnType<typeof periodSummary>;
+  updateState: (updater: (current: StudyState) => StudyState) => void;
+}) {
+  const totalWeight = Object.values(state.scoring.weights).reduce((sum, value) => sum + value, 0);
+
+  function updateWeight(key: keyof ScoreWeights, value: number) {
+    updateState((current) => ({
+      ...current,
+      scoring: {
+        ...current.scoring,
+        weights: { ...current.scoring.weights, [key]: Math.max(0, value) },
+      },
+    }));
+  }
+
+  return (
+    <div className="page-stack scoring-page">
+      <section className="period-score-grid">
+        <RoutinePeriodCard title="近 7 天" subtitle="短期执行与恢复" summary={week} />
+        <RoutinePeriodCard title="近 30 天" subtitle="长期稳定性" summary={month} />
+      </section>
+
+      <section className="panel standards-panel">
+        <div className="panel-heading"><div><p className="card-kicker">身心健康基线</p><h2>评判标准</h2></div><span className="score-badge">透明可调整</span></div>
+        <div className="standards-grid">
+          <article className="standard-card">
+            <span>01</span><div><strong>睡眠：每日 7–9 小时</strong><p>7–9 小时获得完整睡眠分；5–7 小时和 9–11 小时线性递减，超出范围为 0。近 7/30 天同时统计达标比例。</p><a href="https://www.cdc.gov/sleep/data-research/facts-stats/adults-sleep-facts-and-stats.html" target="_blank" rel="noreferrer">CDC 成人睡眠依据</a></div>
+          </article>
+          <article className="standard-card">
+            <span>02</span><div><strong>运动：每周至少 150 分钟</strong><p>单日 30–90 分钟较优；06:00–09:00 或 16:00–20:30 时段加权最高。近 30 天目标按每周 150 分钟等比例换算为约 {month.exerciseTarget} 分钟。</p><a href="https://www.who.int/news-room/fact-sheets/detail/physical-activity" target="_blank" rel="noreferrer">WHO 身体活动依据</a></div>
+          </article>
+          <article className="standard-card">
+            <span>03</span><div><strong>娱乐：日均不高于 2 小时</strong><p>这是本仪表盘的复习期平衡标准，并非医学阈值。0–120 分钟不扣周期平衡分，超过 120 分钟逐步降分，达到 240 分钟时该项为 0。</p></div>
+          </article>
+          <article className="standard-card">
+            <span>04</span><div><strong>学习：23:30 后降权</strong><p>08:00–12:00、14:00–18:00权重最高；正常晚间保持高权重；22:30 后逐步降低，23:30–05:30显著降权并计入深夜学习。</p></div>
+          </article>
+        </div>
+        <p className="standards-note">周期得分 = 记录日平均分 75% + 记录覆盖 10% + 作息平衡 15%。作息平衡综合睡眠达标、运动总量、娱乐时长与深夜学习占比。</p>
+      </section>
+
+      <section className="panel settings-card">
+        <div className="panel-heading">
+          <div><p className="card-kicker">个性化模型</p><h2>核心权重</h2></div>
+          <span className="muted">当前合计 {totalWeight}</span>
+        </div>
+        <p className="settings-copy">权重无需强制合计 100，系统会按当前总和自动归一化。调高某一项，会提高它在每日 100 分中的相对影响。</p>
+        <div className="score-weight-grid">
+          {SCORE_WEIGHT_FIELDS.map((field) => (
+            <label key={field.key}>
+              <span>{field.label}</span>
+              <small>{field.detail}</small>
+              <div><input type="number" min="0" max="100" value={state.scoring.weights[field.key]} onChange={(event) => updateWeight(field.key, Number(event.target.value))} /><em>权重</em></div>
+            </label>
+          ))}
+        </div>
+        <div className="button-row"><button type="button" className="secondary-button" onClick={() => updateState((current) => ({ ...current, scoring: defaultStudyState.scoring }))}><RotateCcw size={17} />恢复推荐权重</button></div>
       </section>
     </div>
   );

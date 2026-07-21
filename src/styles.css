@@ -184,6 +184,7 @@ button { color: inherit; }
 .empty-state > strong { font-size: 14px; }
 .empty-state p { max-width: 430px; margin: 5px 0 7px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .summary-strip { padding: 20px 22px; display: grid; grid-template-columns: repeat(4, 1fr) auto; align-items: center; gap: 20px; }
+.today-summary { grid-template-columns: repeat(6, minmax(0, 1fr)) auto; }
 .summary-strip > div { border-right: 1px solid var(--line); }
 .summary-strip > div:last-of-type { border: 0; }
 .summary-strip span { display: block; color: var(--muted); font-size: 11px; }
@@ -233,6 +234,27 @@ button { color: inherit; }
 .guide-item > span { color: var(--accent); font-size: 24px; font-weight: 800; }
 .guide-item strong { font-size: 12px; }
 .guide-item p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+
+.period-score-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.routine-period-card .progress-ring.compact { flex: 0 0 auto; }
+.routine-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.routine-metric-grid > div { padding: 12px; border-radius: 7px; background: var(--bg-soft); }
+.routine-metric-grid span { display: block; color: var(--muted); font-size: 9px; }
+.routine-metric-grid strong { display: block; margin-top: 5px; color: var(--primary); font-size: 16px; }
+.standards-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.standard-card { display: flex; align-items: flex-start; gap: 14px; padding: 17px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.standard-card > span { color: var(--accent); font-size: 22px; line-height: 1; font-weight: 800; }
+.standard-card strong { font-size: 13px; }
+.standard-card p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.standard-card a { display: inline-block; margin-top: 8px; color: var(--accent); font-size: 10px; font-weight: 700; }
+.standards-note { margin: 14px 0 0; padding: 12px 14px; color: var(--muted); background: var(--accent-soft); border-radius: 7px; font-size: 10px; line-height: 1.7; }
+.score-weight-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.score-weight-grid label { padding: 14px; border-radius: 7px; background: var(--bg-soft); }
+.score-weight-grid label > span { display: block; font-size: 11px; font-weight: 700; }
+.score-weight-grid label > small { display: block; min-height: 30px; margin: 4px 0 8px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.score-weight-grid label > div { position: relative; }
+.score-weight-grid input { padding-right: 49px; }
+.score-weight-grid em { position: absolute; right: 10px; top: 10px; color: var(--muted); font-size: 10px; font-style: normal; }
 
 .settings-card { padding: 26px; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
@@ -292,13 +314,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .topbar { justify-content: flex-start; }
   .topbar-actions { margin-left: auto; }
   .sync-state span { display: none; }
-  .hero-grid, .content-grid, .subject-detail-grid { grid-template-columns: 1fr; }
+  .hero-grid, .content-grid, .subject-detail-grid, .period-score-grid { grid-template-columns: 1fr; }
   .record-cta { grid-column: auto; }
   .summary-strip { grid-template-columns: repeat(2, 1fr); }
   .summary-strip > div { border: 0; }
   .summary-strip .primary-button { grid-column: span 2; }
   .form-grid { grid-template-columns: repeat(2, 1fr); }
-  .weight-grid, .guide-grid { grid-template-columns: repeat(2, 1fr); }
+  .weight-grid, .guide-grid, .score-weight-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 580px) {
@@ -307,7 +329,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .topbar h1 { font-size: 21px; }
   .eyebrow { display: none; }
   .countdown-line { justify-content: flex-start; }
-  .hero-grid, .subject-grid, .summary-strip, .form-grid, .weight-grid, .guide-grid { grid-template-columns: 1fr; }
+  .hero-grid, .subject-grid, .summary-strip, .form-grid, .weight-grid, .guide-grid, .standards-grid, .score-weight-grid, .routine-metric-grid { grid-template-columns: 1fr; }
   .score-card { align-items: flex-start; }
   .metric-card { min-height: auto; }
   .record-cta { min-height: 120px; }
