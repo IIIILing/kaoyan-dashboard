@@ -29,6 +29,16 @@ export type StudySession = {
   note: string;
 };
 
+export type ScoreWeights = {
+  duration: number;
+  completion: number;
+  focus: number;
+  review: number;
+  timing: number;
+  sleep: number;
+  exercise: number;
+};
+
 export type StudyState = {
   version: 1;
   profile: {
@@ -38,6 +48,9 @@ export type StudyState = {
     dailyTargetHours: number;
     wakeTime: string;
     sleepTime: string;
+  };
+  scoring: {
+    weights: ScoreWeights;
   };
   subjects: Subject[];
   sessions: StudySession[];
@@ -52,6 +65,17 @@ export const defaultStudyState: StudyState = {
     dailyTargetHours: 8.5,
     wakeTime: "07:30",
     sleepTime: "23:00",
+  },
+  scoring: {
+    weights: {
+      duration: 25,
+      completion: 15,
+      focus: 10,
+      review: 5,
+      timing: 15,
+      sleep: 20,
+      exercise: 10,
+    },
   },
   subjects: [
     {
