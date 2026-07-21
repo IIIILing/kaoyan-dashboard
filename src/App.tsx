@@ -244,7 +244,65 @@ export default function Dashboard() {
       try {
         const parsed = JSON.parse(local) as StudyState;
         if (parsed.version === 1 && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
-          setState(parsed);
+          const savedEnglish = parsed.subjects.find((subject) => subject.id === "english");
+          const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
+          const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
+            ["eng-word", "eng-read", "eng-other", "eng-write"].includes(phase.id),
+          );
+          const savedCircuit = parsed.subjects.find((subject) => subject.id === "circuit");
+          const defaultCircuit = defaultStudyState.subjects.find((subject) => subject.id === "circuit");
+          const hasLegacyCircuitPlan = savedCircuit?.phases.some((phase) =>
+            ["cir-basic", "cir-exercise", "cir-mock"].includes(phase.id),
+          );
+          if (
+            (savedEnglish && defaultEnglish && hasLegacyEnglishPlan) ||
+            (savedCircuit && defaultCircuit && hasLegacyCircuitPlan)
+          ) {
+            const savedProgress = new Map(
+              savedEnglish?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
+            );
+            const progressSource: Record<string, string> = {
+              "eng-word-first": "eng-word",
+              "eng-real": "eng-read",
+              "eng-writing": "eng-write",
+            };
+            const savedCircuitProgress = new Map(
+              savedCircuit?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
+            );
+            const circuitProgressSource: Record<string, string> = {
+              "cir-first": "cir-basic",
+              "cir-chapter": "cir-exercise",
+              "cir-material": "cir-mock",
+            };
+            setState({
+              ...parsed,
+              subjects: parsed.subjects.map((subject) =>
+                subject.id === "english" && savedEnglish && defaultEnglish && hasLegacyEnglishPlan
+                  ? {
+                      ...subject,
+                      phases: defaultEnglish.phases.map((phase) => ({
+                        ...phase,
+                        progress: savedProgress.get(phase.id) ??
+                          savedProgress.get(progressSource[phase.id]) ??
+                          phase.progress,
+                      })),
+                    }
+                  : subject.id === "circuit" && defaultCircuit && hasLegacyCircuitPlan
+                    ? {
+                        ...subject,
+                        phases: defaultCircuit.phases.map((phase) => ({
+                          ...phase,
+                          progress: savedCircuitProgress.get(phase.id) ??
+                            savedCircuitProgress.get(circuitProgressSource[phase.id]) ??
+                            phase.progress,
+                        })),
+                      }
+                    : subject,
+              ),
+            });
+          } else {
+            setState(parsed);
+          }
         }
       } catch {
         // Ignore a damaged local backup and start from the safe default state.
