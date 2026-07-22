@@ -86,6 +86,12 @@ export type DailyPlan = {
   items: PlanItem[];
 };
 
+export type ScheduleDay = {
+  date: string;
+  planItems: PlanItem[];
+  sessions: StudySession[];
+};
+
 export type PlanTemplate = {
   id: string;
   name: string;
@@ -113,7 +119,7 @@ export type AppearanceSettings = {
 };
 
 export type StudyState = {
-  version: 1;
+  version: 1 | 2;
   profile: {
     name: string;
     target: string;
@@ -136,6 +142,7 @@ export type StudyState = {
   subjects: Subject[];
   sessions: StudySession[];
   plans: DailyPlan[];
+  schedule?: ScheduleDay[];
   planTemplates: PlanTemplate[];
 };
 
@@ -180,7 +187,7 @@ export const defaultLifeActivities: LifeActivity[] = [
 ];
 
 export const defaultStudyState: StudyState = {
-  version: 1,
+  version: 2,
   profile: {
     name: "Jimmy",
     target: "2027 浙江大学电气工程专硕",
@@ -277,6 +284,7 @@ export const defaultStudyState: StudyState = {
   ],
   sessions: [],
   plans: [],
+  schedule: [],
   planTemplates: [],
 };
 

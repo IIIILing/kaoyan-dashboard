@@ -44,12 +44,20 @@ import {
   type WeeklyRuleMetric,
 } from "./study-state";
 import { applyThemePalette, COLOR_FIELDS, THEME_PALETTES } from "./theme-palettes";
+import {
+  createScheduleArchive,
+  mergeImportedPlans,
+  mergeImportedSessions,
+  mergeImportedTemplates,
+  parseScheduleImport,
+  withUnifiedSchedule,
+  type DateRange,
+  type ScheduleImportCandidate,
+} from "./schedule-data";
 
 type View = "overview" | "today" | "records" | "subjects" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
-type DateRange = { from: string; to: string };
-type ImportReport = { added: number; duplicates: number; shifted: number; skipped: number };
 
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "overview", label: "总览", icon: Home },
@@ -153,75 +161,6 @@ function downloadFile(content: string, filename: string, type = "application/jso
 
 function clonePlanItems(items: PlanItem[]) {
   return items.map((item) => ({ ...item, id: crypto.randomUUID() }));
-}
-
-function normalizedTask(task: string) {
-  return task.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
-}
-
-function sessionsOverlap(a: StudySession, b: StudySession) {
-  return a.date === b.date && timeToMinutes(a.start) < timeToMinutes(b.end) && timeToMinutes(b.start) < timeToMinutes(a.end);
-}
-
-function findFreeSlot(sessions: StudySession[], start: string, duration: number) {
-  let candidate = timeToMinutes(start);
-  const daySessions = [...sessions].sort((a, b) => a.start.localeCompare(b.start));
-  while (candidate + duration <= 23 * 60 + 59) {
-    const conflict = daySessions.find(
-      (item) => candidate < timeToMinutes(item.end) && timeToMinutes(item.start) < candidate + duration,
-    );
-    if (!conflict) return { start: minutesToTime(candidate), end: minutesToTime(candidate + duration) };
-    candidate = timeToMinutes(conflict.end);
-  }
-  return null;
-}
-
-function mergeImportedSessions(existing: StudySession[], incoming: StudySession[]) {
-  const merged = [...existing];
-  const report: ImportReport = { added: 0, duplicates: 0, shifted: 0, skipped: 0 };
-
-  [...incoming].sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`)).forEach((item) => {
-    const duplicate = merged.some(
-      (current) =>
-        current.date === item.date &&
-        current.start === item.start &&
-        current.end === item.end &&
-        normalizedTask(current.task) === normalizedTask(item.task),
-    );
-    if (duplicate) {
-      report.duplicates += 1;
-      return;
-    }
-
-    const daySessions = merged.filter((current) => current.date === item.date);
-    if (!daySessions.some((current) => sessionsOverlap(current, item))) {
-      merged.push({ ...item, id: crypto.randomUUID() });
-      report.added += 1;
-      return;
-    }
-
-    const duration = Math.max(1, item.actualMinutes || minutesBetween(item.start, item.end));
-    const free = findFreeSlot(daySessions, item.start, duration);
-    if (!free) {
-      report.skipped += 1;
-      return;
-    }
-    const original = `${item.start}–${item.end}`;
-    const adjustment = `导入冲突调整：原时段 ${original} 与已有任务重叠，已顺延至 ${free.start}–${free.end}。`;
-    merged.push({
-      ...item,
-      id: crypto.randomUUID(),
-      start: free.start,
-      end: free.end,
-      plannedMinutes: duration,
-      actualMinutes: duration,
-      note: item.note.trim() ? `${item.note.trim()}\n${adjustment}` : adjustment,
-    });
-    report.added += 1;
-    report.shifted += 1;
-  });
-
-  return { sessions: merged, report };
 }
 
 function formatMinutes(minutes: number) {
@@ -478,7 +417,7 @@ export default function Dashboard() {
   const [planEditing, setPlanEditing] = useState<PlanItem | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
-  const [importCandidate, setImportCandidate] = useState<StudyState | null>(null);
+  const [importCandidate, setImportCandidate] = useState<ScheduleImportCandidate | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -496,9 +435,11 @@ export default function Dashboard() {
     if (local) {
       try {
         const parsed = JSON.parse(local) as StudyState;
-        if (parsed.version === 1 && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
-          const normalized: StudyState = {
+        if ((parsed.version === 1 || parsed.version === 2) && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
+          const scheduleImport = parseScheduleImport(parsed);
+          const normalized: StudyState = withUnifiedSchedule({
             ...parsed,
+            version: 2,
             profile: {
               ...defaultStudyState.profile,
               ...parsed.profile,
@@ -535,9 +476,11 @@ export default function Dashboard() {
                 resources: Array.isArray(phase.resources) ? phase.resources : [],
               })),
             })),
-            plans: Array.isArray(parsed.plans) ? parsed.plans : [],
+            sessions: scheduleImport?.sessions ?? parsed.sessions,
+            plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
+            schedule: [],
             planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
-          };
+          });
           const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
           const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
           const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
@@ -677,7 +620,7 @@ export default function Dashboard() {
   }
 
   function updateState(updater: (current: StudyState) => StudyState) {
-    setState((current) => updater(current));
+    setState((current) => withUnifiedSchedule(updater(current)));
   }
 
   function addSession(session: StudySession) {
@@ -747,14 +690,11 @@ export default function Dashboard() {
   }
 
   function exportData(range: DateRange) {
-    const selected = { ...state, sessions: state.sessions.filter((item) => isInRange(item.date, range)) };
-    const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `kaoyan-dashboard-${range.from}-${range.to}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const archive = createScheduleArchive(state, range);
+    downloadFile(
+      JSON.stringify(archive, null, 2),
+      `kaoyan-schedule-${range.from}-${range.to}.json`,
+    );
     setBackupMode(null);
   }
 
@@ -762,14 +702,12 @@ export default function Dashboard() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const next = JSON.parse(String(reader.result)) as StudyState;
-        if (next.version !== 1 || !Array.isArray(next.subjects) || !Array.isArray(next.sessions)) {
-          throw new Error("invalid");
-        }
+        const next = parseScheduleImport(JSON.parse(String(reader.result)));
+        if (!next) throw new Error("invalid");
         setImportCandidate(next);
         setBackupMode("import");
       } catch {
-        window.alert("无法导入：请选择由本网站导出的 JSON 备份文件。");
+        window.alert("无法导入：请选择日程归档、旧版整站备份或旧版计划 JSON 文件。");
       }
     };
     reader.readAsText(file);
@@ -777,13 +715,21 @@ export default function Dashboard() {
 
   function importData(range: DateRange) {
     if (!importCandidate) return;
-    const selected = importCandidate.sessions.filter((item) => isInRange(item.date, range));
-    const { sessions, report } = mergeImportedSessions(state.sessions, selected);
-    setState((current) => ({ ...current, sessions }));
+    const selectedSessions = importCandidate.sessions.filter((item) => isInRange(item.date, range));
+    const selectedPlans = importCandidate.plans.filter((item) => isInRange(item.date, range));
+    const sessionMerge = mergeImportedSessions(state.sessions, selectedSessions);
+    const planMerge = mergeImportedPlans(state.plans, selectedPlans);
+    const templateMerge = mergeImportedTemplates(state.planTemplates, importCandidate.planTemplates);
+    setState((current) => withUnifiedSchedule({
+      ...current,
+      sessions: sessionMerge.sessions,
+      plans: planMerge.plans,
+      planTemplates: templateMerge.templates,
+    }));
     setBackupMode(null);
     setImportCandidate(null);
     window.alert(
-      `导入完成：新增 ${report.added} 条，重复跳过 ${report.duplicates} 条，冲突顺延 ${report.shifted} 条，因当天无空档跳过 ${report.skipped} 条。`,
+      `导入完成。时间记录：新增 ${sessionMerge.report.added} 条，重复 ${sessionMerge.report.duplicates} 条，顺延 ${sessionMerge.report.shifted} 条，跳过 ${sessionMerge.report.skipped} 条；今日计划：新增 ${planMerge.report.added} 条，重复 ${planMerge.report.duplicates} 条，顺延 ${planMerge.report.shifted} 条，跳过 ${planMerge.report.skipped} 条；计划模板：新增 ${templateMerge.added} 个，重复 ${templateMerge.duplicates} 个。`,
     );
   }
 
@@ -870,10 +816,19 @@ export default function Dashboard() {
             onEditSession={openEditRecord}
             onDeleteSession={deleteSession}
             onDeletePlan={deletePlanItem}
+            onExportSchedule={() => setBackupMode("export")}
+            onImportSchedule={() => importRef.current?.click()}
           />
         )}
         {view === "records" && (
-          <RecordsView state={state} onRecord={openNewRecord} onEdit={openEditRecord} onDelete={deleteSession} />
+          <RecordsView
+            state={state}
+            onRecord={openNewRecord}
+            onEdit={openEditRecord}
+            onDelete={deleteSession}
+            onExport={() => setBackupMode("export")}
+            onImport={() => importRef.current?.click()}
+          />
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
         {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} summary={weekSummary} />}
@@ -907,6 +862,7 @@ export default function Dashboard() {
         <BackupDialog
           mode={backupMode}
           sessions={backupMode === "import" ? importCandidate?.sessions ?? [] : state.sessions}
+          plans={backupMode === "import" ? importCandidate?.plans ?? [] : state.plans}
           onClose={() => { setBackupMode(null); setImportCandidate(null); }}
           onConfirm={backupMode === "import" ? importData : exportData}
         />
@@ -989,7 +945,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   );
 }
 
-function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
+function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan, onExportSchedule, onImportSchedule }: {
   state: StudyState;
   plan: DailyPlan;
   sessions: StudySession[];
@@ -1003,8 +959,9 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   onEditSession: (session: StudySession) => void;
   onDeleteSession: (id: string) => void;
   onDeletePlan: (id: string) => void;
+  onExportSchedule: () => void;
+  onImportSchedule: () => void;
 }) {
-  const importRef = useRef<HTMLInputElement>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const selectedTemplate = state.planTemplates.find((template) => template.id === selectedTemplateId)
     ?? state.planTemplates[0];
@@ -1020,42 +977,6 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
         ? current.plans.map((item) => item.date === plan.date ? { ...item, items } : item)
         : [...current.plans, { date: plan.date, items }],
     }));
-  }
-
-  function exportPlan() {
-    downloadFile(JSON.stringify({ kind: "kaoyan-daily-plan", version: 1, ...plan }, null, 2), `每日计划-${plan.date}.json`);
-  }
-
-  function exportPlanArchive() {
-    downloadFile(JSON.stringify({ kind: "kaoyan-plan-archive", version: 1, plans: state.plans, planTemplates: state.planTemplates }, null, 2), "全部每日计划与模板.json");
-  }
-
-  function importPlan(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as Partial<DailyPlan> & { kind?: string; plans?: DailyPlan[]; planTemplates?: PlanTemplate[] };
-        if (Array.isArray(parsed.plans)) {
-          if (!window.confirm(`文件包含 ${parsed.plans.length} 天计划，将按日期替换同日期计划并导入模板，是否继续？`)) return;
-          updateState((current) => {
-            const importedDates = new Set(parsed.plans!.map((item) => item.date));
-            const plans = [...current.plans.filter((item) => !importedDates.has(item.date)), ...parsed.plans!.map((item) => ({ ...item, items: clonePlanItems(item.items ?? []) }))];
-            const templates = Array.isArray(parsed.planTemplates)
-              ? [...current.planTemplates, ...parsed.planTemplates.map((template) => ({ ...template, id: crypto.randomUUID(), items: clonePlanItems(template.items ?? []) }))]
-              : current.planTemplates;
-            return { ...current, plans, planTemplates: templates };
-          });
-          return;
-        }
-        if (!Array.isArray(parsed.items)) throw new Error("invalid");
-        const items = parsed.items.filter((item): item is PlanItem => Boolean(item?.start && item?.end && item?.task && item?.subjectId));
-        if (plan.items.length && !window.confirm("导入会替换今天已有的计划，是否继续？")) return;
-        replaceTodayPlan(clonePlanItems(items));
-      } catch {
-        window.alert("无法导入：请选择由今日计划页面导出的 JSON 文件。");
-      }
-    };
-    reader.readAsText(file);
   }
 
   function saveAsTemplate() {
@@ -1095,19 +1016,13 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
       </section>
       <div className="page-actions plan-actions">
         <div className="plan-date-control"><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, -1))}>前一天</button><label><span>计划日期</span><input type="date" value={planDate} onChange={(event) => event.target.value && onPlanDateChange(event.target.value)} /></label><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, 1))}>后一天</button><button className="text-button" onClick={() => onPlanDateChange(localDate())}>回到今天</button></div>
-        <p className="muted">计划与实际记录相互独立，可浏览过去或提前安排未来日期。</p>
+        <p className="muted">计划与实际记录按日期统一存储，可在一个 JSON 日程归档中一起备份和合并。</p>
         <div className="button-row compact-buttons">
           <button className="secondary-button" onClick={onRecord}><Clock3 size={16} />记录实际</button>
-          <button className="secondary-button" onClick={exportPlan}><Download size={16} />导出计划</button>
-          <button className="secondary-button" onClick={exportPlanArchive}><Download size={16} />导出计划库</button>
-          <button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入计划</button>
+          <button className="secondary-button" onClick={onExportSchedule}><Download size={16} />导出日程 JSON</button>
+          <button className="secondary-button" onClick={onImportSchedule}><FileUp size={16} />导入日程 JSON</button>
           <button className="secondary-button" disabled={!plan.items.length} onClick={saveAsTemplate}><Save size={16} />保存为模板</button>
         </div>
-        <input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) importPlan(file);
-          event.target.value = "";
-        }} />
       </div>
       <section className="panel schedule-panel">
         <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>{plan.date === localDate() ? "今日" : "当日"}计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
@@ -1136,11 +1051,25 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   );
 }
 
-function RecordsView({ state, onRecord, onEdit, onDelete }: { state: StudyState; onRecord: () => void; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
+function RecordsView({ state, onRecord, onEdit, onDelete, onExport, onImport }: {
+  state: StudyState;
+  onRecord: () => void;
+  onEdit: (session: StudySession) => void;
+  onDelete: (id: string) => void;
+  onExport: () => void;
+  onImport: () => void;
+}) {
   const dates = Array.from(new Set(state.sessions.map((item) => item.date))).sort().reverse();
   return (
     <div className="page-stack narrow-page">
-      <div className="page-actions"><p className="muted">共 {state.sessions.length} 条记录 · 当前浏览器本地保存</p><button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button></div>
+      <div className="page-actions">
+        <p className="muted">共 {state.sessions.length} 条记录 · 与今日计划统一备份</p>
+        <div className="button-row compact-buttons">
+          <button className="secondary-button" onClick={onExport}><Download size={16} />导出日程 JSON</button>
+          <button className="secondary-button" onClick={onImport}><FileUp size={16} />导入日程 JSON</button>
+          <button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button>
+        </div>
+      </div>
       {dates.length ? dates.map((date) => (
         <section className="panel" key={date}>
           <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
@@ -1612,20 +1541,24 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
   );
 }
 
-function BackupDialog({ mode, sessions, onClose, onConfirm }: {
+function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
   mode: BackupMode;
   sessions: StudySession[];
+  plans: DailyPlan[];
   onClose: () => void;
   onConfirm: (range: DateRange) => void;
 }) {
-  const dates = sessions.map((item) => item.date).sort();
+  const dates = [...sessions.map((item) => item.date), ...plans.map((item) => item.date)].sort();
   const firstDate = dates[0] ?? localDate();
   const lastDate = dates.at(-1) ?? localDate();
   const [anchor, setAnchor] = useState(lastDate);
   const [range, setRange] = useState<DateRange>(() =>
     mode === "import" ? { from: firstDate, to: lastDate } : presetRange("week", lastDate),
   );
-  const count = sessions.filter((item) => isInRange(item.date, range)).length;
+  const sessionCount = sessions.filter((item) => isInRange(item.date, range)).length;
+  const planCount = plans
+    .filter((item) => isInRange(item.date, range))
+    .reduce((sum, item) => sum + item.items.length, 0);
   const invalid = !range.from || !range.to || range.from > range.to;
 
   function applyPreset(preset: "day" | "week" | "month") {
@@ -1654,17 +1587,17 @@ function BackupDialog({ mode, sessions, onClose, onConfirm }: {
           </div>
           <div className="range-summary">
             <CalendarDays size={19} />
-            <div><strong>{invalid ? "日期范围无效" : `${range.from} 至 ${range.to}`}</strong><span>范围内共有 {count} 条学习记录，最小选择精度为一天。</span></div>
+            <div><strong>{invalid ? "日期范围无效" : `${range.from} 至 ${range.to}`}</strong><span>范围内共有 {sessionCount} 条时间记录和 {planCount} 个计划时段，最小选择精度为一天。</span></div>
           </div>
           {mode === "import" && (
             <div className="conflict-policy">
               <strong>导入冲突规则</strong>
-              <p>相同日期、起止时间和任务名称的记录会跳过；不同任务时间重叠时，导入记录按原时长顺延到当天最早空闲时段，并写入调整备注，不覆盖已有数据。</p>
+              <p>时间记录和今日计划都会按日期、起止时间及任务名称查重；不同任务的时段重叠时，导入项按原时长顺延到当天最早空闲时段，并写入调整备注，不覆盖已有数据。</p>
             </div>
           )}
         </div>
         <div className="dialog-footer">
-          <span>{mode === "export" ? "导出文件包含项目设置、科目进度和所选日期记录。" : "仅合并所选日期，不改动项目设置和科目进度。"}</span>
+          <span>{mode === "export" ? "一个 JSON 文件包含项目设置、科目进度、所选日期的计划与时间记录。" : "合并所选日期的计划与时间记录，不改动项目设置和科目进度。"}</span>
           <div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="button" className="primary-button" disabled={invalid} onClick={() => onConfirm(range)}>{mode === "export" ? <Download size={17} /> : <FileUp size={17} />}{mode === "export" ? "导出 JSON" : "合并导入"}</button></div>
         </div>
       </section>
