@@ -96,6 +96,7 @@ button { color: inherit; }
 :root[data-theme="dark"] .sidebar { background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--primary) 58%, var(--sidebar-end) 100%); }
 .brand-block { display: flex; align-items: center; gap: 12px; padding: 3px 9px 29px; }
 .brand-mark { width: 39px; height: 39px; display: grid; place-items: center; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); border-radius: 9px; font-weight: 800; font-size: 20px; }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 8px; }
 .brand-block strong { display: block; font-size: 20px; letter-spacing: .02em; }
 .brand-block span { display: block; margin-top: 4px; color: rgba(255,255,255,.66); font-size: 11px; }
 .nav-list { display: grid; gap: 6px; }
@@ -213,6 +214,7 @@ button { color: inherit; }
 .completion-pill { color: var(--success); background: var(--success-soft); padding: 4px 7px; border-radius: 5px; font-size: 10px; font-weight: 800; text-align: center; }
 .session-row > button { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 5px; }
 .session-row > button:hover { color: var(--danger); }
+.session-row > .row-actions { grid-column: 6; }
 
 .schedule-panel { overflow: hidden; }
 .day-schedule { display: grid; grid-template-columns: minmax(112px, 180px) minmax(520px, 1fr); column-gap: 14px; overflow-x: auto; padding: 2px 2px 4px; }
@@ -251,6 +253,10 @@ button { color: inherit; }
 .plan-list-row div span { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .plan-list-row > button { border: 0; background: transparent; color: var(--faint); cursor: pointer; }
 .plan-list-row > button:hover { color: var(--danger); }
+.row-actions { display: inline-flex !important; align-items: center; justify-content: flex-end; gap: 4px; }
+.row-actions button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer; }
+.row-actions button:hover { color: var(--accent); background: var(--accent-soft); }
+.row-actions button:last-child:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .template-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .template-toolbar label { width: min(360px, 100%); }
 .template-toolbar label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
@@ -337,6 +343,14 @@ button { color: inherit; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
 .form-grid .wide { grid-column: span 2; }
 .form-grid label > span, .weight-grid label > span, .dialog-grid label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.field-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.sidebar-icon-setting { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.sidebar-icon-setting .settings-copy { margin: 0; }
+.sidebar-icon-actions { display: flex; align-items: center; gap: 9px; }
+.sidebar-icon-preview { width: 48px; height: 48px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--primary); color: #fff; font-size: 20px; font-weight: 800; }
+.sidebar-icon-preview img { width: 100%; height: 100%; object-fit: cover; }
+.file-button { position: relative; overflow: hidden; cursor: pointer; }
+.file-button input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 input, select, textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-strong); color: var(--text); outline: none; }
 input, select { height: 39px; padding: 0 11px; }
 textarea { min-height: 82px; padding: 10px 11px; resize: vertical; }
@@ -446,6 +460,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .summary-strip > div, .summary-strip .primary-button { grid-column: auto; }
   .form-grid .wide { grid-column: auto; }
   .session-row { grid-template-columns: 7px 82px 1fr 28px; gap: 8px; padding: 10px 0; }
+  .session-row > .row-actions { grid-column: 4; grid-row: 1 / span 2; }
   .session-duration, .completion-pill { display: none; }
   .day-schedule { grid-template-columns: 96px 520px; column-gap: 10px; }
   .schedule-legend { justify-content: flex-start; }
@@ -463,6 +478,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .template-toolbar > div { display: grid; grid-template-columns: 1fr 1fr; }
   .progress-hero-actions { align-items: flex-end; flex-direction: column; }
   .phase-editor-basics, .palette-grid, .color-picker-grid { grid-template-columns: 1fr; }
+  .sidebar-icon-setting { grid-template-columns: 1fr; }
+  .sidebar-icon-actions { flex-wrap: wrap; }
   .resource-add-form { grid-template-columns: 1fr; }
   .resource-add-form .primary-button { grid-column: auto; }
   .resource-row { grid-template-columns: 22px 50px 1fr 30px; }

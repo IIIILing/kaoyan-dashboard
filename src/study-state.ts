@@ -112,6 +112,7 @@ export type StudyState = {
     target: string;
     sidebarTitle: string;
     sidebarSubtitle: string;
+    sidebarIcon: string;
     targetSchool: string;
     targetDescription: string;
     examDate: string;
@@ -165,6 +166,7 @@ export const defaultStudyState: StudyState = {
     target: "2027 浙江大学电气工程专硕",
     sidebarTitle: "浙研Z 2027",
     sidebarSubtitle: "电气专硕",
+    sidebarIcon: "",
     targetSchool: "浙江大学",
     targetDescription: "电气工程专硕 · 数一 / 英一 / 840",
     examDate: "2026-12-20",

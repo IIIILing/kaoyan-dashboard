@@ -13,6 +13,7 @@ import {
   ListTodo,
   Moon,
   Palette,
+  Pencil,
   Plus,
   RotateCcw,
   Save,
@@ -91,6 +92,12 @@ const LIFE_ACTIVITIES = [
   { id: "sleep", name: "睡觉", accent: "#6f7fa5" },
   { id: "exercise", name: "运动", accent: "#3f8b72" },
   { id: "entertainment", name: "娱乐", accent: "#b27955" },
+  { id: "wash", name: "个人洗漱", accent: "#4d91b8" },
+  { id: "meal", name: "吃饭", accent: "#c27b43" },
+  { id: "commute", name: "通勤", accent: "#8273a7" },
+  { id: "housework", name: "家务", accent: "#8b9b58" },
+  { id: "rest", name: "休息", accent: "#7d8790" },
+  { id: "planning", name: "写计划", accent: "#5e789e" },
 ] as const;
 const LIFE_ACTIVITY_IDS = new Set<string>(LIFE_ACTIVITIES.map((item) => item.id));
 
@@ -473,7 +480,9 @@ export default function Dashboard() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
+  const [recordEditing, setRecordEditing] = useState<StudySession | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  const [planEditing, setPlanEditing] = useState<PlanItem | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
   const [importCandidate, setImportCandidate] = useState<StudyState | null>(null);
@@ -500,6 +509,7 @@ export default function Dashboard() {
             profile: {
               ...defaultStudyState.profile,
               ...parsed.profile,
+              sidebarIcon: parsed.profile?.sidebarIcon ?? defaultStudyState.profile.sidebarIcon,
             },
             scoring: {
               weights: {
@@ -674,8 +684,24 @@ export default function Dashboard() {
   }
 
   function addSession(session: StudySession) {
-    updateState((current) => ({ ...current, sessions: [...current.sessions, session] }));
+    updateState((current) => ({
+      ...current,
+      sessions: current.sessions.some((item) => item.id === session.id)
+        ? current.sessions.map((item) => item.id === session.id ? session : item)
+        : [...current.sessions, session],
+    }));
+    setRecordEditing(null);
     setRecordOpen(false);
+  }
+
+  function openNewRecord() {
+    setRecordEditing(null);
+    setRecordOpen(true);
+  }
+
+  function openEditRecord(session: StudySession) {
+    setRecordEditing(session);
+    setRecordOpen(true);
   }
 
   function deleteSession(id: string) {
@@ -689,11 +715,29 @@ export default function Dashboard() {
     updateState((current) => {
       const existing = current.plans.find((plan) => plan.date === planDate);
       const plans = existing
-        ? current.plans.map((plan) => plan.date === planDate ? { ...plan, items: [...plan.items, item] } : plan)
+        ? current.plans.map((plan) => plan.date === planDate
+          ? {
+              ...plan,
+              items: plan.items.some((entry) => entry.id === item.id)
+                ? plan.items.map((entry) => entry.id === item.id ? item : entry)
+                : [...plan.items, item],
+            }
+          : plan)
         : [...current.plans, { date: planDate, items: [item] }];
       return { ...current, plans };
     });
+    setPlanEditing(null);
     setPlanOpen(false);
+  }
+
+  function openNewPlan() {
+    setPlanEditing(null);
+    setPlanOpen(true);
+  }
+
+  function openEditPlan(item: PlanItem) {
+    setPlanEditing(item);
+    setPlanOpen(true);
   }
 
   function deletePlanItem(id: string) {
@@ -752,7 +796,9 @@ export default function Dashboard() {
     <div className="app-shell">
       <aside className={`sidebar ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="brand-block">
-          <div className="brand-mark">Z</div>
+          <div className="brand-mark">
+            {state.profile.sidebarIcon ? <img src={state.profile.sidebarIcon} alt="侧栏图标" /> : "Z"}
+          </div>
           <div><strong>{state.profile.sidebarTitle}</strong><span>{state.profile.sidebarSubtitle}</span></div>
         </div>
         <nav className="nav-list" aria-label="主要导航">
@@ -808,7 +854,7 @@ export default function Dashboard() {
             progress={progress}
             projectScore={projectScore}
             days={daysUntil(state.profile.examDate)}
-            onRecord={() => setRecordOpen(true)}
+            onRecord={openNewRecord}
             onNavigate={setView}
           />
         )}
@@ -821,13 +867,16 @@ export default function Dashboard() {
             planDate={planDate}
             onPlanDateChange={setPlanDate}
             updateState={updateState}
-            onAddPlan={() => setPlanOpen(true)}
-            onRecord={() => setRecordOpen(true)}
+            onAddPlan={openNewPlan}
+            onRecord={openNewRecord}
+            onEditPlan={openEditPlan}
+            onEditSession={openEditRecord}
+            onDeleteSession={deleteSession}
             onDeletePlan={deletePlanItem}
           />
         )}
         {view === "records" && (
-          <RecordsView state={state} onRecord={() => setRecordOpen(true)} onDelete={deleteSession} />
+          <RecordsView state={state} onRecord={openNewRecord} onEdit={openEditRecord} onDelete={deleteSession} />
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
         {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} summary={weekSummary} />}
@@ -855,8 +904,8 @@ export default function Dashboard() {
         }} />
       </main>
 
-      {recordOpen && <RecordDialog state={state} onClose={() => setRecordOpen(false)} onSave={addSession} />}
-      {planOpen && <PlanItemDialog state={state} onClose={() => setPlanOpen(false)} onSave={addPlanItem} />}
+      {recordOpen && <RecordDialog state={state} initial={recordEditing} onClose={() => { setRecordOpen(false); setRecordEditing(null); }} onSave={addSession} />}
+      {planOpen && <PlanItemDialog state={state} initial={planEditing} onClose={() => { setPlanOpen(false); setPlanEditing(null); }} onSave={addPlanItem} />}
       {backupMode && (
         <BackupDialog
           mode={backupMode}
@@ -943,7 +992,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   );
 }
 
-function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onDeletePlan }: {
+function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
   state: StudyState;
   plan: DailyPlan;
   sessions: StudySession[];
@@ -953,6 +1002,9 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   updateState: (updater: (current: StudyState) => StudyState) => void;
   onAddPlan: () => void;
   onRecord: () => void;
+  onEditPlan: (item: PlanItem) => void;
+  onEditSession: (session: StudySession) => void;
+  onDeleteSession: (id: string) => void;
   onDeletePlan: (id: string) => void;
 }) {
   const importRef = useRef<HTMLInputElement>(null);
@@ -1063,7 +1115,7 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
       <section className="panel schedule-panel">
         <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>{plan.date === localDate() ? "今日" : "当日"}计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
         <DayScheduleChart entries={plan.items} state={state} mode="planned" />
-        {plan.items.length > 0 && <><div className="schedule-table-divider" /><PlanTable items={plan.items} state={state} onDelete={onDeletePlan} /></>}
+        {plan.items.length > 0 && <><div className="schedule-table-divider" /><EditablePlanTable items={plan.items} state={state} onEdit={onEditPlan} onDelete={onDeletePlan} /></>}
       </section>
       <section className="panel template-panel">
         <div className="panel-heading"><div><p className="card-kicker">可复用安排</p><h2>计划模板预览</h2></div><span className="muted">{state.planTemplates.length} 个模板</span></div>
@@ -1081,13 +1133,13 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
       </section>
       <section className="panel">
         <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>当天的实际记录</h2></div><span className="muted">目标 {state.profile.dailyTargetHours} 小时</span></div>
-        {sessions.length ? <DayScheduleChart entries={sessions} state={state} mode="actual" /> : <EmptyState icon={Clock3} title="今天还没有实际记录" detail="执行计划后记录真实时段，计划图与实际图会分别保留。" action="记录第一个时段" onAction={onRecord} />}
+        {sessions.length ? <><DayScheduleChart entries={sessions} state={state} mode="actual" /><div className="schedule-table-divider" /><EditableSessionTable sessions={sessions} state={state} onEdit={onEditSession} onDelete={onDeleteSession} /></> : <EmptyState icon={Clock3} title="今天还没有实际记录" detail="执行计划后记录真实时段，计划图与实际图会分别保留。" action="记录第一个时段" onAction={onRecord} />}
       </section>
     </div>
   );
 }
 
-function RecordsView({ state, onRecord, onDelete }: { state: StudyState; onRecord: () => void; onDelete: (id: string) => void }) {
+function RecordsView({ state, onRecord, onEdit, onDelete }: { state: StudyState; onRecord: () => void; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
   const dates = Array.from(new Set(state.sessions.map((item) => item.date))).sort().reverse();
   return (
     <div className="page-stack narrow-page">
@@ -1097,7 +1149,7 @@ function RecordsView({ state, onRecord, onDelete }: { state: StudyState; onRecor
           <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
           <DayScheduleChart entries={sessionsForDate(state.sessions, date)} state={state} mode="actual" />
           <div className="schedule-table-divider" />
-          <SessionTable sessions={sessionsForDate(state.sessions, date)} state={state} onDelete={onDelete} />
+            <EditableSessionTable sessions={sessionsForDate(state.sessions, date)} state={state} onEdit={onEdit} onDelete={onDelete} />
         </section>
       )) : <section className="panel"><EmptyState icon={Clock3} title="记录会按日期沉淀在这里" detail="完成第一条记录后，可在这里查看全部历史。" action="新增记录" onAction={onRecord} /></section>}
     </div>
@@ -1452,6 +1504,22 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
       },
     }));
   }
+  function uploadSidebarIcon(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      window.alert("请选择 PNG、JPG、WEBP 或 SVG 图片。");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      window.alert("图标图片不能超过 2 MB。");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => updateProfile("sidebarIcon", String(reader.result));
+    reader.readAsDataURL(file);
+  }
   return (
     <div className="page-stack settings-page">
       <section className="panel settings-card">
@@ -1461,6 +1529,14 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
           <label className="wide"><span>目标项目</span><input value={state.profile.target} onChange={(e) => updateProfile("target", e.target.value)} /></label>
           <label><span>侧栏主标题</span><input value={state.profile.sidebarTitle} onChange={(e) => updateProfile("sidebarTitle", e.target.value)} /></label>
           <label className="wide"><span>侧栏副标题</span><input value={state.profile.sidebarSubtitle} onChange={(e) => updateProfile("sidebarSubtitle", e.target.value)} /></label>
+          <div className="wide sidebar-icon-setting">
+            <div><span className="field-label">侧栏图标</span><p className="settings-copy">上传后会保存在本机浏览器，并替换左侧标题旁的 Z 图标。</p></div>
+            <div className="sidebar-icon-actions">
+              <div className="sidebar-icon-preview">{state.profile.sidebarIcon ? <img src={state.profile.sidebarIcon} alt="当前侧栏图标" /> : "Z"}</div>
+              <label className="secondary-button file-button"><FileUp size={16} />上传图标<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={uploadSidebarIcon} /></label>
+              {state.profile.sidebarIcon && <button type="button" className="danger-button" onClick={() => updateProfile("sidebarIcon", "")}>恢复 Z</button>}
+            </div>
+          </div>
           <label><span>目标院校</span><input value={state.profile.targetSchool} onChange={(e) => updateProfile("targetSchool", e.target.value)} /></label>
           <label className="wide"><span>目标说明</span><input value={state.profile.targetDescription} onChange={(e) => updateProfile("targetDescription", e.target.value)} /></label>
           <label><span>暂定初试日期</span><input type="date" value={state.profile.examDate} onChange={(e) => updateProfile("examDate", e.target.value)} /></label>
@@ -1562,12 +1638,21 @@ function BackupDialog({ mode, sessions, onClose, onConfirm }: {
   );
 }
 
-function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: () => void; onSave: (session: StudySession) => void }) {
+function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; initial: StudySession | null; onClose: () => void; onSave: (session: StudySession) => void }) {
   const now = new Date();
   const end = `${String(now.getHours()).padStart(2, "0")}:${String(Math.floor(now.getMinutes() / 5) * 5).padStart(2, "0")}`;
   const startDate = new Date(now.getTime() - 90 * 60_000);
   const start = `${String(startDate.getHours()).padStart(2, "0")}:${String(Math.floor(startDate.getMinutes() / 5) * 5).padStart(2, "0")}`;
-  const [form, setForm] = useState({ date: localDate(), start, end, subjectId: "math", task: "", completion: 100, focus: 4, note: "" });
+  const [form, setForm] = useState(() => initial ? {
+    date: initial.date,
+    start: initial.start,
+    end: initial.end,
+    subjectId: initial.subjectId,
+    task: initial.task,
+    completion: initial.completion,
+    focus: initial.focus,
+    note: initial.note,
+  } : { date: localDate(), start, end, subjectId: "math", task: "", completion: 100, focus: 4, note: "" });
   const selectedActivity = lifeActivity(form.subjectId);
   const isLifeActivity = Boolean(selectedActivity);
   const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
@@ -1580,12 +1665,12 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!form.task.trim() || plannedMinutes <= 0) return;
-    onSave({ id: crypto.randomUUID(), ...form, task: form.task.trim(), plannedMinutes, actualMinutes: plannedMinutes });
+    onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, task: form.task.trim(), plannedMinutes, actualMinutes: plannedMinutes });
   }
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>记录一个时段</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>{initial ? "编辑时间记录" : "记录一个时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>日期</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
           <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
@@ -1596,24 +1681,30 @@ function RecordDialog({ state, onClose, onSave }: { state: StudyState; onClose: 
           {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: Number(e.target.value) })} /></label>}
           <label className="wide"><span>{isLifeActivity ? "备注（可选）" : "复盘（可选）"}</span><textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "卡在哪里？下一次从哪里继续？"} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
         </div>
-        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || plannedMinutes <= 0}><Check size={17} />保存记录</button></div></div>
+        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || plannedMinutes <= 0}><Check size={17} />{initial ? "保存修改" : "保存记录"}</button></div></div>
       </form>
     </div>
   );
 }
 
-function PlanItemDialog({ state, onClose, onSave }: { state: StudyState; onClose: () => void; onSave: (item: PlanItem) => void }) {
-  const [form, setForm] = useState({ start: "08:00", end: "10:00", subjectId: state.subjects[0]?.id ?? "math", task: "", note: "" });
+function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState; initial: PlanItem | null; onClose: () => void; onSave: (item: PlanItem) => void }) {
+  const [form, setForm] = useState(() => initial ? {
+    start: initial.start,
+    end: initial.end,
+    subjectId: initial.subjectId,
+    task: initial.task,
+    note: initial.note,
+  } : { start: "08:00", end: "10:00", subjectId: state.subjects[0]?.id ?? "math", task: "", note: "" });
   const duration = minutesBetween(form.start, form.end, form.subjectId === "sleep");
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!form.task.trim() || duration <= 0) return;
-    onSave({ id: crypto.randomUUID(), ...form, task: form.task.trim() });
+    onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, task: form.task.trim() });
   }
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">今日计划</p><h2>安排一个计划时段</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-heading"><div><p className="card-kicker">今日计划</p><h2>{initial ? "编辑计划时段" : "安排一个计划时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
           <label><span>计划任务</span><input autoFocus value={form.task} placeholder="例如：高数基础讲义第 3 章" onChange={(event) => setForm({ ...form, task: event.target.value })} /></label>
@@ -1621,14 +1712,48 @@ function PlanItemDialog({ state, onClose, onSave }: { state: StudyState; onClose
           <label><span>结束时间</span><input type="time" value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label>
           <label className="wide"><span>计划备注（可选）</span><textarea value={form.note} placeholder="目标章节、题量或完成标准" onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
         </div>
-        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || duration <= 0}><Save size={16} />保存计划</button></div></div>
+        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || duration <= 0}><Save size={16} />{initial ? "保存修改" : "保存计划"}</button></div></div>
       </form>
     </div>
   );
 }
 
-function SessionTable({ sessions, state, onDelete }: { sessions: StudySession[]; state: StudyState; onDelete: (id: string) => void }) {
+function SessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
   return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
+}
+
+function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
+  return <div className="session-table">{sessions.map((session) => {
+    const subject = state.subjects.find((item) => item.id === session.subjectId);
+    const activity = lifeActivity(session.subjectId);
+    return <div className="session-row" key={session.id}>
+      <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
+      <time>{session.start}–{session.end}</time>
+      <div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div>
+      <span className="session-duration">{formatMinutes(session.actualMinutes)}</span>
+      <span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span>
+      <span className="row-actions">
+        <button type="button" onClick={() => onEdit(session)} aria-label="编辑记录"><Pencil size={15} /></button>
+        <button type="button" onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button>
+      </span>
+    </div>;
+  })}</div>;
+}
+
+function EditablePlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
+  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => {
+    const subject = state.subjects.find((entry) => entry.id === item.subjectId);
+    const activity = lifeActivity(item.subjectId);
+    return <div className="plan-list-row" key={item.id}>
+      <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
+      <time>{item.start}–{item.end}</time>
+      <div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div>
+      <span className="row-actions">
+        <button type="button" onClick={() => onEdit(item)} aria-label="编辑计划"><Pencil size={15} /></button>
+        <button type="button" onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button>
+      </span>
+    </div>;
+  })}</div>;
 }
 
 function DayScheduleChart({ entries, state, mode }: {
@@ -1680,7 +1805,7 @@ function DayScheduleChart({ entries, state, mode }: {
   );
 }
 
-function PlanTable({ items, state, onDelete }: { items: PlanItem[]; state: StudyState; onDelete: (id: string) => void }) {
+function PlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
   return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
