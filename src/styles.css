@@ -368,6 +368,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .subject-settings-list input[type="color"] { padding: 4px; cursor: pointer; }
 .subject-settings-list article > button { width: 34px; height: 39px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); cursor: pointer; }
 .subject-settings-list article > button:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.life-activity-settings-list { display: grid; gap: 10px; }
+.life-activity-settings-list article { display: grid; grid-template-columns: 12px 1fr 80px 34px; gap: 10px; align-items: end; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.life-activity-settings-list label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.life-activity-settings-list input[type="color"] { padding: 4px; cursor: pointer; }
+.activity-color-dot { width: 10px; height: 10px; align-self: center; border-radius: 50%; }
 .palette-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .palette-grid > button { min-height: 128px; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); text-align: left; cursor: pointer; transition: .16s ease; }
 .palette-grid > button:hover, .palette-grid > button.active { border-color: var(--accent); transform: translateY(-1px); }
@@ -443,6 +448,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .weekly-rule-card .rule-description { grid-column: 2 / span 2; }
   .subject-settings-list article { grid-template-columns: 1fr 1fr 80px 70px; }
   .subject-settings-list .subject-note-field { grid-column: 1 / span 3; }
+  .life-activity-settings-list article { grid-template-columns: 12px 1fr 70px 34px; }
   .resource-add-form { grid-template-columns: 100px 1fr; }
   .resource-add-form .primary-button { grid-column: 2; }
 }
@@ -492,6 +498,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .subject-settings-list article { grid-template-columns: 1fr 1fr 34px; }
   .subject-settings-list article label { grid-column: 1 / span 2; }
   .subject-settings-list article > button { grid-column: 3; grid-row: 1; }
+  .life-activity-settings-list article { grid-template-columns: 12px 1fr 34px; }
+  .life-activity-settings-list article label:nth-of-type(2) { grid-column: 2; }
+  .life-activity-settings-list article > button { grid-column: 3; grid-row: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

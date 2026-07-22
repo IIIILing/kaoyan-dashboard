@@ -28,6 +28,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   defaultStudyState,
+  defaultLifeActivities,
   projectProgress,
   subjectProgress,
   type DailyPlan,
@@ -35,6 +36,7 @@ import {
   type PlanTemplate,
   type ScoreWeights,
   type StudySession,
+  type LifeActivity,
   type StudyResource,
   type StudyState,
   type Subject,
@@ -88,21 +90,10 @@ const RESOURCE_TYPES = [
 
 const LOCAL_KEY = "kaoyan-dashboard-state-v1";
 const THEME_KEY = "kaoyan-dashboard-theme";
-const LIFE_ACTIVITIES = [
-  { id: "sleep", name: "睡觉", accent: "#6f7fa5" },
-  { id: "exercise", name: "运动", accent: "#3f8b72" },
-  { id: "entertainment", name: "娱乐", accent: "#b27955" },
-  { id: "wash", name: "个人洗漱", accent: "#4d91b8" },
-  { id: "meal", name: "吃饭", accent: "#c27b43" },
-  { id: "commute", name: "通勤", accent: "#8273a7" },
-  { id: "housework", name: "家务", accent: "#8b9b58" },
-  { id: "rest", name: "休息", accent: "#7d8790" },
-  { id: "planning", name: "写计划", accent: "#5e789e" },
-] as const;
-const LIFE_ACTIVITY_IDS = new Set<string>(LIFE_ACTIVITIES.map((item) => item.id));
+const LIFE_ACTIVITIES = defaultLifeActivities;
 
-function lifeActivity(subjectId: string) {
-  return LIFE_ACTIVITIES.find((item) => item.id === subjectId);
+function lifeActivity(subjectId: string, activities: LifeActivity[] = LIFE_ACTIVITIES) {
+  return activities.find((item) => item.id === subjectId && item.active !== false);
 }
 
 function localDate(date = new Date()) {
@@ -300,8 +291,9 @@ function sessionMinutesMatching(session: StudySession, matches: (minute: number)
   return total;
 }
 
-function dailyMetrics(sessions: StudySession[], targetHours: number, weights: ScoreWeights) {
-  const studySessions = sessions.filter((item) => !LIFE_ACTIVITY_IDS.has(item.subjectId));
+function dailyMetrics(sessions: StudySession[], targetHours: number, weights: ScoreWeights, activities: LifeActivity[] = LIFE_ACTIVITIES) {
+  const activityIds = new Set(activities.map((activity) => activity.id));
+  const studySessions = sessions.filter((item) => !activityIds.has(item.subjectId));
   const sleepSessions = sessions.filter((item) => item.subjectId === "sleep");
   const exerciseSessions = sessions.filter((item) => item.subjectId === "exercise");
   const actualMinutes = studySessions.reduce((sum, item) => sum + item.actualMinutes, 0);
@@ -406,8 +398,9 @@ function periodSummary(
   targetHours: number,
   weights: ScoreWeights,
   weeklyRules = defaultStudyState.scoring.weeklyRules,
+  activities: LifeActivity[] = LIFE_ACTIVITIES,
 ) {
-  const days = dates.map((date) => dailyMetrics(sessionsForDate(sessions, date), targetHours, weights));
+  const days = dates.map((date) => dailyMetrics(sessionsForDate(sessions, date), targetHours, weights, activities));
   const recordedDays = days.filter((item) => item.hasRecords);
   const sleepDays = days.filter((item) => item.sleepMinutes > 0);
   const averageDailyScore = recordedDays.length
@@ -532,6 +525,9 @@ export default function Dashboard() {
                 ...parsed.appearance?.customDark,
               },
             },
+            lifeActivities: Array.isArray(parsed.lifeActivities)
+              ? parsed.lifeActivities.map((activity) => ({ ...activity, active: activity.active !== false }))
+              : defaultLifeActivities,
             subjects: parsed.subjects.map((subject) => ({
               ...subject,
               phases: subject.phases.map((phase) => ({
@@ -632,12 +628,12 @@ export default function Dashboard() {
   );
   const planSessions = useMemo(() => sessionsForDate(state.sessions, planDate), [state.sessions, planDate]);
   const planMetrics = useMemo(
-    () => dailyMetrics(planSessions, state.profile.dailyTargetHours, state.scoring.weights),
-    [planSessions, state.profile.dailyTargetHours, state.scoring.weights],
+    () => dailyMetrics(planSessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities),
+    [planSessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities],
   );
   const todayMetrics = useMemo(
-    () => dailyMetrics(todaySessions, state.profile.dailyTargetHours, state.scoring.weights),
-    [todaySessions, state.profile.dailyTargetHours, state.scoring.weights],
+    () => dailyMetrics(todaySessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities),
+    [todaySessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities],
   );
   const progress = useMemo(() => projectProgress(state.subjects), [state.subjects]);
   const sevenDates = useMemo(() => recentDates(7), [today]);
@@ -650,17 +646,18 @@ export default function Dashboard() {
           sessionsForDate(state.sessions, date),
           state.profile.dailyTargetHours,
           state.scoring.weights,
+          state.lifeActivities,
         ),
       })),
-    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights],
+    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities],
   );
   const weekSummary = useMemo(
-    () => periodSummary(state.sessions, sevenDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules),
-    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules],
+    () => periodSummary(state.sessions, sevenDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules, state.lifeActivities),
+    [sevenDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules, state.lifeActivities],
   );
   const monthSummary = useMemo(
-    () => periodSummary(state.sessions, thirtyDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules),
-    [thirtyDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules],
+    () => periodSummary(state.sessions, thirtyDates, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules, state.lifeActivities),
+    [thirtyDates, state.sessions, state.profile.dailyTargetHours, state.scoring.weights, state.scoring.weeklyRules, state.lifeActivities],
   );
   const activeDays = weekMetrics.filter((item) => item.hasRecords);
   const weeklyAverage = activeDays.length
@@ -959,7 +956,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
                   <span className="timeline-dot"><Check size={13} /></span>
                   <time>{session.start}–{session.end}</time>
                   <strong>{session.task}</strong>
-                  <span>{lifeActivity(session.subjectId)?.name ?? `${session.completion}%`}</span>
+                  <span>{lifeActivity(session.subjectId, state.lifeActivities)?.name ?? `${session.completion}%`}</span>
                 </div>
               ))}
             </div>
@@ -1487,9 +1484,33 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
   function updateSubject(id: string, changes: Partial<Subject>) {
     updateState((current) => ({ ...current, subjects: current.subjects.map((subject) => subject.id === id ? { ...subject, ...changes } : subject) }));
   }
+  function updateLifeActivity(id: string, changes: Partial<LifeActivity>) {
+    updateState((current) => ({
+      ...current,
+      lifeActivities: current.lifeActivities.map((activity) => activity.id === id ? { ...activity, ...changes } : activity),
+    }));
+  }
   function addSubject() {
     const subject: Subject = { id: crypto.randomUUID(), name: "新考试科目", shortName: "新科目", weight: 0, accent: "#4f7ea8", note: "点击科目进度新增复习阶段", phases: [] };
     updateState((current) => ({ ...current, subjects: [...current.subjects, subject] }));
+  }
+  function addLifeActivity() {
+    const activity: LifeActivity = { id: `life-${crypto.randomUUID()}`, name: "新生活活动", accent: "#6287a8" };
+    updateState((current) => ({ ...current, lifeActivities: [...current.lifeActivities, activity] }));
+  }
+  function deleteLifeActivity(activity: LifeActivity) {
+    const referenced = state.sessions.some((session) => session.subjectId === activity.id)
+      || state.plans.some((plan) => plan.items.some((item) => item.subjectId === activity.id))
+      || state.planTemplates.some((template) => template.items.some((item) => item.subjectId === activity.id));
+    if (!window.confirm(referenced
+      ? `“${activity.name}”已有记录或计划，删除后会从新增下拉框隐藏，历史数据仍会保留。确定继续吗？`
+      : `确定删除生活活动“${activity.name}”？`)) return;
+    updateState((current) => ({
+      ...current,
+      lifeActivities: referenced
+        ? current.lifeActivities.map((item) => item.id === activity.id ? { ...item, active: false } : item)
+        : current.lifeActivities.filter((item) => item.id !== activity.id),
+    }));
   }
   function updateCustomColor(key: keyof ThemeColors, value: string) {
     updateState((current) => ({
@@ -1555,6 +1576,19 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
           <label className="subject-note-field"><span>科目说明</span><input value={subject.note} onChange={(event) => updateSubject(subject.id, { note: event.target.value })} /></label>
           <button onClick={() => window.confirm(`确定删除考试科目“${subject.name}”？对应阶段会一起删除，已有时间记录不会自动删除。`) && updateState((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id) }))} aria-label="删除科目"><Trash2 size={16} /></button>
         </article>)}</div>
+      </section>
+      <section className="panel settings-card">
+        <div className="panel-heading"><div><p className="card-kicker">生活安排</p><h2>生活活动管理</h2></div><div className="heading-actions"><span className="muted">{state.lifeActivities.filter((activity) => activity.active !== false).length} 个活动</span><button className="primary-button" type="button" onClick={addLifeActivity}><Plus size={16} />新增活动</button></div></div>
+        <p className="settings-copy">生活活动会出现在计划和时间记录的“科目 / 活动”下拉框中，不会计入有效学习时长。删除已有数据使用过的活动时，历史记录会保留但该活动会从新增列表隐藏。</p>
+        <div className="life-activity-settings-list">
+          {state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <article key={activity.id}>
+            <span className="activity-color-dot" style={{ background: activity.accent }} />
+            <label><span>活动名称</span><input value={activity.name} onChange={(event) => updateLifeActivity(activity.id, { name: event.target.value })} /></label>
+            <label><span>活动颜色</span><input type="color" value={activity.accent} onChange={(event) => updateLifeActivity(activity.id, { accent: event.target.value })} /></label>
+            <button type="button" className="rule-delete" onClick={() => deleteLifeActivity(activity)} aria-label={`删除生活活动${activity.name}`}><Trash2 size={16} /></button>
+          </article>)}
+          {!state.lifeActivities.some((activity) => activity.active !== false) && <div className="schedule-empty">还没有生活活动，点击“新增活动”开始配置。</div>}
+        </div>
       </section>
       <section className="panel settings-card appearance-settings">
         <div className="panel-heading"><div><p className="card-kicker">视觉外观</p><h2>页面配色方案</h2></div><Palette size={20} /></div>
@@ -1653,12 +1687,12 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
     focus: initial.focus,
     note: initial.note,
   } : { date: localDate(), start, end, subjectId: "math", task: "", completion: 100, focus: 4, note: "" });
-  const selectedActivity = lifeActivity(form.subjectId);
+  const selectedActivity = lifeActivity(form.subjectId, state.lifeActivities);
   const isLifeActivity = Boolean(selectedActivity);
   const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
   function changeCategory(subjectId: string) {
-    const previousActivity = lifeActivity(form.subjectId);
-    const nextActivity = lifeActivity(subjectId);
+    const previousActivity = lifeActivity(form.subjectId, state.lifeActivities);
+    const nextActivity = lifeActivity(subjectId, state.lifeActivities);
     const canAutofill = !form.task.trim() || form.task === previousActivity?.name;
     setForm({ ...form, subjectId, task: nextActivity && canAutofill ? nextActivity.name : form.task });
   }
@@ -1673,7 +1707,7 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
         <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>{initial ? "编辑时间记录" : "记录一个时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>日期</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
+          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
           <label><span>开始时间</span><input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></label>
           <label><span>结束时间</span><input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></label>
           <label className="wide"><span>{isLifeActivity ? "活动内容" : "本时段任务"}</span><input autoFocus placeholder={isLifeActivity ? `例如：${selectedActivity?.name}` : "例如：1000题概率统计第1章"} value={form.task} onChange={(e) => setForm({ ...form, task: e.target.value })} /></label>
@@ -1706,7 +1740,7 @@ function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState
       <form className="record-dialog" onSubmit={submit}>
         <div className="dialog-heading"><div><p className="card-kicker">今日计划</p><h2>{initial ? "编辑计划时段" : "安排一个计划时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
-          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{LIFE_ACTIVITIES.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
+          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
           <label><span>计划任务</span><input autoFocus value={form.task} placeholder="例如：高数基础讲义第 3 章" onChange={(event) => setForm({ ...form, task: event.target.value })} /></label>
           <label><span>开始时间</span><input type="time" value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label>
           <label><span>结束时间</span><input type="time" value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label>
@@ -1719,13 +1753,13 @@ function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState
 }
 
 function SessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
-  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
+  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId, state.lifeActivities); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
 function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
   return <div className="session-table">{sessions.map((session) => {
     const subject = state.subjects.find((item) => item.id === session.subjectId);
-    const activity = lifeActivity(session.subjectId);
+    const activity = lifeActivity(session.subjectId, state.lifeActivities);
     return <div className="session-row" key={session.id}>
       <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
       <time>{session.start}–{session.end}</time>
@@ -1743,7 +1777,7 @@ function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions:
 function EditablePlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
   return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => {
     const subject = state.subjects.find((entry) => entry.id === item.subjectId);
-    const activity = lifeActivity(item.subjectId);
+    const activity = lifeActivity(item.subjectId, state.lifeActivities);
     return <div className="plan-list-row" key={item.id}>
       <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
       <time>{item.start}–{item.end}</time>
@@ -1780,7 +1814,7 @@ function DayScheduleChart({ entries, state, mode }: {
       <div className="schedule-axis">{hours.map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
       {chartEntries.map((entry) => {
         const subject = state.subjects.find((item) => item.id === entry.subjectId);
-        const activity = lifeActivity(entry.subjectId);
+        const activity = lifeActivity(entry.subjectId, state.lifeActivities);
         const duration = durationFor(entry);
         const start = timeToMinutes(entry.start);
         const firstDuration = Math.min(duration, 24 * 60 - start);
@@ -1806,7 +1840,7 @@ function DayScheduleChart({ entries, state, mode }: {
 }
 
 function PlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
-  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
+  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId, state.lifeActivities); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
 function ProgressRing({ value, label, compact = false, color }: { value: number; label?: string; compact?: boolean; color?: string }) {

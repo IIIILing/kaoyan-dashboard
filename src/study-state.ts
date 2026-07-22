@@ -38,6 +38,13 @@ export type StudySession = {
   note: string;
 };
 
+export type LifeActivity = {
+  id: string;
+  name: string;
+  accent: string;
+  active?: boolean;
+};
+
 export type ScoreWeights = {
   duration: number;
   completion: number;
@@ -125,6 +132,7 @@ export type StudyState = {
     weeklyRules: WeeklyRule[];
   };
   appearance: AppearanceSettings;
+  lifeActivities: LifeActivity[];
   subjects: Subject[];
   sessions: StudySession[];
   plans: DailyPlan[];
@@ -158,6 +166,18 @@ export const defaultDarkColors: ThemeColors = {
   sidebarStart: "#0c385b",
   sidebarEnd: "#082740",
 };
+
+export const defaultLifeActivities: LifeActivity[] = [
+  { id: "sleep", name: "睡觉", accent: "#6f7fa5" },
+  { id: "exercise", name: "运动", accent: "#3f8b72" },
+  { id: "entertainment", name: "娱乐", accent: "#b27955" },
+  { id: "wash", name: "个人洗漱", accent: "#4d91b8" },
+  { id: "meal", name: "吃饭", accent: "#c27b43" },
+  { id: "commute", name: "通勤", accent: "#8273a7" },
+  { id: "housework", name: "家务", accent: "#8b9b58" },
+  { id: "rest", name: "休息", accent: "#7d8790" },
+  { id: "planning", name: "写计划", accent: "#5e789e" },
+];
 
 export const defaultStudyState: StudyState = {
   version: 1,
@@ -195,6 +215,7 @@ export const defaultStudyState: StudyState = {
     customLight: defaultLightColors,
     customDark: defaultDarkColors,
   },
+  lifeActivities: defaultLifeActivities,
   subjects: [
     {
       id: "math",
