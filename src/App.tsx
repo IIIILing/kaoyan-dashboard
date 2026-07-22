@@ -816,8 +816,6 @@ export default function Dashboard() {
             onEditSession={openEditRecord}
             onDeleteSession={deleteSession}
             onDeletePlan={deletePlanItem}
-            onExportSchedule={() => setBackupMode("export")}
-            onImportSchedule={() => importRef.current?.click()}
           />
         )}
         {view === "records" && (
@@ -826,8 +824,6 @@ export default function Dashboard() {
             onRecord={openNewRecord}
             onEdit={openEditRecord}
             onDelete={deleteSession}
-            onExport={() => setBackupMode("export")}
-            onImport={() => importRef.current?.click()}
           />
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
@@ -945,7 +941,7 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   );
 }
 
-function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan, onExportSchedule, onImportSchedule }: {
+function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
   state: StudyState;
   plan: DailyPlan;
   sessions: StudySession[];
@@ -959,8 +955,6 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   onEditSession: (session: StudySession) => void;
   onDeleteSession: (id: string) => void;
   onDeletePlan: (id: string) => void;
-  onExportSchedule: () => void;
-  onImportSchedule: () => void;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const selectedTemplate = state.planTemplates.find((template) => template.id === selectedTemplateId)
@@ -1016,11 +1010,9 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
       </section>
       <div className="page-actions plan-actions">
         <div className="plan-date-control"><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, -1))}>前一天</button><label><span>计划日期</span><input type="date" value={planDate} onChange={(event) => event.target.value && onPlanDateChange(event.target.value)} /></label><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, 1))}>后一天</button><button className="text-button" onClick={() => onPlanDateChange(localDate())}>回到今天</button></div>
-        <p className="muted">计划与实际记录按日期统一存储，可在一个 JSON 日程归档中一起备份和合并。</p>
+        <p className="muted">计划与实际记录按日期统一存储。</p>
         <div className="button-row compact-buttons">
           <button className="secondary-button" onClick={onRecord}><Clock3 size={16} />记录实际</button>
-          <button className="secondary-button" onClick={onExportSchedule}><Download size={16} />导出日程 JSON</button>
-          <button className="secondary-button" onClick={onImportSchedule}><FileUp size={16} />导入日程 JSON</button>
           <button className="secondary-button" disabled={!plan.items.length} onClick={saveAsTemplate}><Save size={16} />保存为模板</button>
         </div>
       </div>
@@ -1051,22 +1043,18 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   );
 }
 
-function RecordsView({ state, onRecord, onEdit, onDelete, onExport, onImport }: {
+function RecordsView({ state, onRecord, onEdit, onDelete }: {
   state: StudyState;
   onRecord: () => void;
   onEdit: (session: StudySession) => void;
   onDelete: (id: string) => void;
-  onExport: () => void;
-  onImport: () => void;
 }) {
   const dates = Array.from(new Set(state.sessions.map((item) => item.date))).sort().reverse();
   return (
     <div className="page-stack narrow-page">
       <div className="page-actions">
-        <p className="muted">共 {state.sessions.length} 条记录 · 与今日计划统一备份</p>
+        <p className="muted">共 {state.sessions.length} 条记录 · 与今日计划按日期统一存储</p>
         <div className="button-row compact-buttons">
-          <button className="secondary-button" onClick={onExport}><Download size={16} />导出日程 JSON</button>
-          <button className="secondary-button" onClick={onImport}><FileUp size={16} />导入日程 JSON</button>
           <button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button>
         </div>
       </div>
