@@ -1686,7 +1686,7 @@ function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState
 }
 
 function SessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
-  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId, state.lifeActivities); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
+  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId, state.lifeActivities); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="category-pill">{activity ? "活动" : "科目"}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
 }
 
 function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
@@ -1698,7 +1698,7 @@ function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions:
       <time>{session.start}–{session.end}</time>
       <div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div>
       <span className="session-duration">{formatMinutes(session.actualMinutes)}</span>
-      <span className="completion-pill">{activity ? "生活" : `${session.completion}%`}</span>
+      <span className="category-pill">{activity ? "活动" : "科目"}</span>
       <span className="row-actions">
         <button type="button" onClick={() => onEdit(session)} aria-label="编辑记录"><Pencil size={15} /></button>
         <button type="button" onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button>
