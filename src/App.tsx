@@ -23,6 +23,8 @@ import {
   Target,
   TimerReset,
   Trash2,
+  UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -58,6 +60,17 @@ import {
 type View = "overview" | "today" | "records" | "subjects" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
+type DashboardAccount = {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastActiveAt: string;
+};
+type AccountRegistry = {
+  version: 1;
+  activeAccountId: string;
+  accounts: DashboardAccount[];
+};
 
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "overview", label: "总览", icon: Home },
@@ -96,9 +109,151 @@ const RESOURCE_TYPES = [
   { value: "other", label: "其他" },
 ] as const;
 
-const LOCAL_KEY = "kaoyan-dashboard-state-v1";
+const LEGACY_LOCAL_KEY = "kaoyan-dashboard-state-v1";
+const ACCOUNT_REGISTRY_KEY = "kaoyan-dashboard-accounts-v1";
+const ACCOUNT_STATE_PREFIX = "kaoyan-dashboard-account-state-v1:";
 const THEME_KEY = "kaoyan-dashboard-theme";
 const LIFE_ACTIVITIES = defaultLifeActivities;
+
+function accountStateKey(accountId: string) {
+  return `${ACCOUNT_STATE_PREFIX}${accountId}`;
+}
+
+function freshStudyState(name: string) {
+  const next = JSON.parse(JSON.stringify(defaultStudyState)) as StudyState;
+  next.profile.name = name;
+  return next;
+}
+
+function isAccountRegistry(value: unknown): value is AccountRegistry {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<AccountRegistry>;
+  return candidate.version === 1
+    && typeof candidate.activeAccountId === "string"
+    && Array.isArray(candidate.accounts)
+    && candidate.accounts.length > 0
+    && candidate.accounts.every((account) =>
+      account
+      && typeof account.id === "string"
+      && typeof account.name === "string"
+      && typeof account.createdAt === "string"
+      && typeof account.lastActiveAt === "string",
+    );
+}
+
+function normalizeStudyState(value: unknown): StudyState | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as StudyState;
+  if (
+    (parsed.version !== 1 && parsed.version !== 2)
+    || !Array.isArray(parsed.subjects)
+    || !Array.isArray(parsed.sessions)
+  ) return null;
+
+  const scheduleImport = parseScheduleImport(parsed);
+  const normalized: StudyState = withUnifiedSchedule({
+    ...parsed,
+    version: 2,
+    profile: {
+      ...defaultStudyState.profile,
+      ...parsed.profile,
+      sidebarIcon: parsed.profile?.sidebarIcon ?? defaultStudyState.profile.sidebarIcon,
+    },
+    scoring: {
+      weights: {
+        ...defaultStudyState.scoring.weights,
+        ...parsed.scoring?.weights,
+      },
+      weeklyRules: Array.isArray(parsed.scoring?.weeklyRules)
+        ? parsed.scoring.weeklyRules
+        : defaultStudyState.scoring.weeklyRules,
+    },
+    appearance: {
+      ...defaultStudyState.appearance,
+      ...parsed.appearance,
+      customLight: {
+        ...defaultStudyState.appearance.customLight,
+        ...parsed.appearance?.customLight,
+      },
+      customDark: {
+        ...defaultStudyState.appearance.customDark,
+        ...parsed.appearance?.customDark,
+      },
+    },
+    lifeActivities: Array.isArray(parsed.lifeActivities)
+      ? parsed.lifeActivities.map((activity) => ({ ...activity, active: activity.active !== false }))
+      : defaultLifeActivities,
+    subjects: parsed.subjects.map((subject) => ({
+      ...subject,
+      phases: subject.phases.map((phase) => ({
+        ...phase,
+        resources: Array.isArray(phase.resources) ? phase.resources : [],
+      })),
+    })),
+    sessions: scheduleImport?.sessions ?? parsed.sessions,
+    plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
+    schedule: [],
+    planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
+  });
+
+  const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
+  const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
+  const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
+    ["eng-word", "eng-read", "eng-other", "eng-write"].includes(phase.id),
+  );
+  const savedCircuit = normalized.subjects.find((subject) => subject.id === "circuit");
+  const defaultCircuit = defaultStudyState.subjects.find((subject) => subject.id === "circuit");
+  const hasLegacyCircuitPlan = savedCircuit?.phases.some((phase) =>
+    ["cir-basic", "cir-exercise", "cir-mock"].includes(phase.id),
+  );
+  if (
+    !((savedEnglish && defaultEnglish && hasLegacyEnglishPlan)
+      || (savedCircuit && defaultCircuit && hasLegacyCircuitPlan))
+  ) return normalized;
+
+  const savedProgress = new Map(
+    savedEnglish?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
+  );
+  const progressSource: Record<string, string> = {
+    "eng-word-first": "eng-word",
+    "eng-real": "eng-read",
+    "eng-writing": "eng-write",
+  };
+  const savedCircuitProgress = new Map(
+    savedCircuit?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
+  );
+  const circuitProgressSource: Record<string, string> = {
+    "cir-first": "cir-basic",
+    "cir-chapter": "cir-exercise",
+    "cir-material": "cir-mock",
+  };
+  return {
+    ...normalized,
+    subjects: normalized.subjects.map((subject) =>
+      subject.id === "english" && savedEnglish && defaultEnglish && hasLegacyEnglishPlan
+        ? {
+            ...subject,
+            phases: defaultEnglish.phases.map((phase) => ({
+              ...phase,
+              progress: savedProgress.get(phase.id)
+                ?? savedProgress.get(progressSource[phase.id])
+                ?? phase.progress,
+            })),
+          }
+        : subject.id === "circuit" && defaultCircuit && hasLegacyCircuitPlan
+          ? {
+              ...subject,
+              phases: defaultCircuit.phases.map((phase) => ({
+                ...phase,
+                progress: savedCircuitProgress.get(phase.id)
+                  ?? savedCircuitProgress.get(circuitProgressSource[phase.id])
+                  ?? phase.progress,
+              })),
+            }
+          : subject,
+    ),
+  };
+}
 
 function lifeActivity(subjectId: string, activities: LifeActivity[] = LIFE_ACTIVITIES) {
   return activities.find((item) => item.id === subjectId && item.active !== false);
@@ -406,6 +561,8 @@ function periodSummary(
 
 export default function Dashboard() {
   const [state, setState] = useState<StudyState>(defaultStudyState);
+  const [accounts, setAccounts] = useState<DashboardAccount[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState("");
   const [view, setView] = useState<View>("overview");
   const [planDate, setPlanDate] = useState(localDate());
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -431,133 +588,93 @@ export default function Dashboard() {
     queueMicrotask(() => setTheme(initial));
     document.documentElement.dataset.theme = initial;
 
-    const local = window.localStorage.getItem(LOCAL_KEY);
-    if (local) {
+    let registry: AccountRegistry | null = null;
+    const storedRegistry = window.localStorage.getItem(ACCOUNT_REGISTRY_KEY);
+    if (storedRegistry) {
       try {
-        const parsed = JSON.parse(local) as StudyState;
-        if ((parsed.version === 1 || parsed.version === 2) && Array.isArray(parsed.subjects) && Array.isArray(parsed.sessions)) {
-          const scheduleImport = parseScheduleImport(parsed);
-          const normalized: StudyState = withUnifiedSchedule({
-            ...parsed,
-            version: 2,
-            profile: {
-              ...defaultStudyState.profile,
-              ...parsed.profile,
-              sidebarIcon: parsed.profile?.sidebarIcon ?? defaultStudyState.profile.sidebarIcon,
-            },
-            scoring: {
-              weights: {
-                ...defaultStudyState.scoring.weights,
-                ...parsed.scoring?.weights,
-              },
-              weeklyRules: Array.isArray(parsed.scoring?.weeklyRules)
-                ? parsed.scoring.weeklyRules
-                : defaultStudyState.scoring.weeklyRules,
-            },
-            appearance: {
-              ...defaultStudyState.appearance,
-              ...parsed.appearance,
-              customLight: {
-                ...defaultStudyState.appearance.customLight,
-                ...parsed.appearance?.customLight,
-              },
-              customDark: {
-                ...defaultStudyState.appearance.customDark,
-                ...parsed.appearance?.customDark,
-              },
-            },
-            lifeActivities: Array.isArray(parsed.lifeActivities)
-              ? parsed.lifeActivities.map((activity) => ({ ...activity, active: activity.active !== false }))
-              : defaultLifeActivities,
-            subjects: parsed.subjects.map((subject) => ({
-              ...subject,
-              phases: subject.phases.map((phase) => ({
-                ...phase,
-                resources: Array.isArray(phase.resources) ? phase.resources : [],
-              })),
-            })),
-            sessions: scheduleImport?.sessions ?? parsed.sessions,
-            plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
-            schedule: [],
-            planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
-          });
-          const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
-          const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
-          const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
-            ["eng-word", "eng-read", "eng-other", "eng-write"].includes(phase.id),
-          );
-          const savedCircuit = normalized.subjects.find((subject) => subject.id === "circuit");
-          const defaultCircuit = defaultStudyState.subjects.find((subject) => subject.id === "circuit");
-          const hasLegacyCircuitPlan = savedCircuit?.phases.some((phase) =>
-            ["cir-basic", "cir-exercise", "cir-mock"].includes(phase.id),
-          );
-          if (
-            (savedEnglish && defaultEnglish && hasLegacyEnglishPlan) ||
-            (savedCircuit && defaultCircuit && hasLegacyCircuitPlan)
-          ) {
-            const savedProgress = new Map(
-              savedEnglish?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
-            );
-            const progressSource: Record<string, string> = {
-              "eng-word-first": "eng-word",
-              "eng-real": "eng-read",
-              "eng-writing": "eng-write",
-            };
-            const savedCircuitProgress = new Map(
-              savedCircuit?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
-            );
-            const circuitProgressSource: Record<string, string> = {
-              "cir-first": "cir-basic",
-              "cir-chapter": "cir-exercise",
-              "cir-material": "cir-mock",
-            };
-            setState({
-              ...normalized,
-              subjects: normalized.subjects.map((subject) =>
-                subject.id === "english" && savedEnglish && defaultEnglish && hasLegacyEnglishPlan
-                  ? {
-                      ...subject,
-                      phases: defaultEnglish.phases.map((phase) => ({
-                        ...phase,
-                        progress: savedProgress.get(phase.id) ??
-                          savedProgress.get(progressSource[phase.id]) ??
-                          phase.progress,
-                      })),
-                    }
-                  : subject.id === "circuit" && defaultCircuit && hasLegacyCircuitPlan
-                    ? {
-                        ...subject,
-                        phases: defaultCircuit.phases.map((phase) => ({
-                          ...phase,
-                          progress: savedCircuitProgress.get(phase.id) ??
-                            savedCircuitProgress.get(circuitProgressSource[phase.id]) ??
-                            phase.progress,
-                        })),
-                      }
-                    : subject,
-              ),
-            });
-          } else {
-            setState(normalized);
-          }
-        }
+        const parsedRegistry = JSON.parse(storedRegistry) as unknown;
+        if (isAccountRegistry(parsedRegistry)) registry = parsedRegistry;
       } catch {
-        // Ignore a damaged local backup and start from the safe default state.
+        // A damaged registry is handled by the safe legacy/default migration below.
       }
+    }
+
+    if (registry) {
+      const activeAccount = registry.accounts.find(
+        (account) => account.id === registry?.activeAccountId,
+      ) ?? registry.accounts[0];
+      let accountState: StudyState | null = null;
+      const storedAccountState = window.localStorage.getItem(accountStateKey(activeAccount.id));
+      if (storedAccountState) {
+        try {
+          accountState = normalizeStudyState(JSON.parse(storedAccountState) as unknown);
+        } catch {
+          // Ignore a damaged account snapshot and open a fresh isolated state.
+        }
+      }
+      setAccounts(registry.accounts);
+      setActiveAccountId(activeAccount.id);
+      setState(accountState ?? freshStudyState(activeAccount.name));
+      if (activeAccount.id !== registry.activeAccountId) {
+        window.localStorage.setItem(
+          ACCOUNT_REGISTRY_KEY,
+          JSON.stringify({ ...registry, activeAccountId: activeAccount.id }),
+        );
+      }
+    } else {
+      let legacyState: StudyState | null = null;
+      const legacy = window.localStorage.getItem(LEGACY_LOCAL_KEY);
+      if (legacy) {
+        try {
+          legacyState = normalizeStudyState(JSON.parse(legacy) as unknown);
+        } catch {
+          // Keep the damaged legacy value untouched so a manual recovery remains possible.
+        }
+      }
+      const accountName = legacyState?.profile.name.trim() || "默认账号";
+      const accountId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const account: DashboardAccount = {
+        id: accountId,
+        name: accountName,
+        createdAt: now,
+        lastActiveAt: now,
+      };
+      const initialState = legacyState ?? freshStudyState(accountName);
+      const initialRegistry: AccountRegistry = {
+        version: 1,
+        activeAccountId: accountId,
+        accounts: [account],
+      };
+      window.localStorage.setItem(accountStateKey(accountId), JSON.stringify(initialState));
+      window.localStorage.setItem(ACCOUNT_REGISTRY_KEY, JSON.stringify(initialRegistry));
+      setAccounts([account]);
+      setActiveAccountId(accountId);
+      setState(initialState);
     }
     setSaveStatus("saved");
     setLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !activeAccountId) return;
     queueMicrotask(() => setSaveStatus("saving"));
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(LOCAL_KEY, JSON.stringify(state));
+      window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
       setSaveStatus("saved");
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [state, loaded]);
+  }, [state, loaded, activeAccountId]);
+
+  useEffect(() => {
+    if (!loaded || !activeAccountId || !accounts.length) return;
+    const registry: AccountRegistry = {
+      version: 1,
+      activeAccountId,
+      accounts,
+    };
+    window.localStorage.setItem(ACCOUNT_REGISTRY_KEY, JSON.stringify(registry));
+  }, [accounts, activeAccountId, loaded]);
 
   useEffect(() => {
     applyThemePalette(state.appearance, theme);
@@ -617,6 +734,110 @@ export default function Dashboard() {
     setTheme(next);
     document.documentElement.dataset.theme = next;
     window.localStorage.setItem(THEME_KEY, next);
+  }
+
+  function loadAccountState(account: DashboardAccount) {
+    const stored = window.localStorage.getItem(accountStateKey(account.id));
+    if (stored) {
+      try {
+        const normalized = normalizeStudyState(JSON.parse(stored) as unknown);
+        if (normalized) return normalized;
+      } catch {
+        // A damaged account snapshot falls back to a clean state for this account.
+      }
+    }
+    return freshStudyState(account.name);
+  }
+
+  function switchAccount(accountId: string) {
+    if (!accountId || accountId === activeAccountId) return;
+    const nextAccount = accounts.find((account) => account.id === accountId);
+    if (!nextAccount) return;
+
+    if (activeAccountId) {
+      window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
+    }
+    const now = new Date().toISOString();
+    setSaveStatus("loading");
+    setAccounts((current) => current.map((account) =>
+      account.id === accountId ? { ...account, lastActiveAt: now } : account,
+    ));
+    setActiveAccountId(accountId);
+    setState(loadAccountState(nextAccount));
+    setRecordOpen(false);
+    setRecordEditing(null);
+    setPlanOpen(false);
+    setPlanEditing(null);
+    setBackupMode(null);
+    setImportCandidate(null);
+    setView("overview");
+    setSaveStatus("saved");
+  }
+
+  function addAccount(name: string) {
+    const accountName = name.trim();
+    if (!accountName) {
+      window.alert("请输入账号名称。");
+      return false;
+    }
+    if (accounts.some((account) => account.name.toLocaleLowerCase() === accountName.toLocaleLowerCase())) {
+      window.alert("已有同名账号，请换一个名称。");
+      return false;
+    }
+    if (activeAccountId) {
+      window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
+    }
+    const now = new Date().toISOString();
+    const account: DashboardAccount = {
+      id: crypto.randomUUID(),
+      name: accountName,
+      createdAt: now,
+      lastActiveAt: now,
+    };
+    const nextState = freshStudyState(accountName);
+    window.localStorage.setItem(accountStateKey(account.id), JSON.stringify(nextState));
+    setAccounts((current) => [...current, account]);
+    setActiveAccountId(account.id);
+    setState(nextState);
+    setView("overview");
+    setSaveStatus("saved");
+    return true;
+  }
+
+  function renameAccount(accountId: string, name: string) {
+    const accountName = name.trim();
+    if (!accountName) {
+      window.alert("账号名称不能为空。");
+      return false;
+    }
+    if (accounts.some((account) =>
+      account.id !== accountId
+      && account.name.toLocaleLowerCase() === accountName.toLocaleLowerCase()
+    )) {
+      window.alert("已有同名账号，请换一个名称。");
+      return false;
+    }
+    setAccounts((current) => current.map((account) =>
+      account.id === accountId ? { ...account, name: accountName } : account,
+    ));
+    if (accountId === activeAccountId) {
+      updateState((current) => ({
+        ...current,
+        profile: { ...current.profile, name: accountName },
+      }));
+    }
+    return true;
+  }
+
+  function deleteAccount(accountId: string) {
+    if (accountId === activeAccountId) {
+      window.alert("当前正在使用的账号不能删除，请先切换到其他账号。");
+      return;
+    }
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account || !window.confirm(`确定删除账号“${account.name}”及其全部本机数据？此操作无法撤销。`)) return;
+    window.localStorage.removeItem(accountStateKey(accountId));
+    setAccounts((current) => current.filter((item) => item.id !== accountId));
   }
 
   function updateState(updater: (current: StudyState) => StudyState) {
@@ -734,6 +955,7 @@ export default function Dashboard() {
   }
 
   const viewTitle = NAV.find((item) => item.id === view)?.label ?? "总览";
+  const activeAccount = accounts.find((account) => account.id === activeAccountId);
 
   return (
     <div className="app-shell">
@@ -782,6 +1004,19 @@ export default function Dashboard() {
             <h1>{view === "overview" ? `晚上好，${state.profile.name}` : viewTitle}</h1>
           </div>
           <div className="topbar-actions">
+            <label className="account-switcher">
+              <Users size={17} />
+              <span>当前账号</span>
+              <select
+                aria-label="快速切换账号"
+                value={activeAccountId}
+                onChange={(event) => switchAccount(event.target.value)}
+              >
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.name}</option>
+                ))}
+              </select>
+            </label>
             <div className={`sync-state ${saveStatus}`} title="学习数据仅保存在当前浏览器">
               <HardDrive size={16} />
               <span>{saveStatus === "loading" ? "正在读取" : saveStatus === "saving" ? "正在保存" : "已保存到本机"}</span>
@@ -839,10 +1074,17 @@ export default function Dashboard() {
         {view === "settings" && (
           <SettingsView
             state={state}
+            accounts={accounts}
+            activeAccountId={activeAccountId}
             updateState={updateState}
+            onSwitchAccount={switchAccount}
+            onAddAccount={addAccount}
+            onRenameAccount={renameAccount}
+            onDeleteAccount={deleteAccount}
             onExport={() => setBackupMode("export")}
             onImport={() => importRef.current?.click()}
-            onReset={() => window.confirm("确定恢复初始信息？现有记录将被清空。") && setState(defaultStudyState)}
+            onReset={() => window.confirm("确定恢复当前账号的初始信息？当前账号的现有记录将被清空。")
+              && setState(freshStudyState(activeAccount?.name ?? "默认账号"))}
           />
         )}
         <input ref={importRef} type="file" hidden accept="application/json" onChange={(event) => {
@@ -1393,8 +1635,47 @@ function ScoringView({ state, week, month, updateState }: {
   );
 }
 
-function SettingsView({ state, updateState, onExport, onImport, onReset }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void; onExport: () => void; onImport: () => void; onReset: () => void }) {
+function SettingsView({
+  state,
+  accounts,
+  activeAccountId,
+  updateState,
+  onSwitchAccount,
+  onAddAccount,
+  onRenameAccount,
+  onDeleteAccount,
+  onExport,
+  onImport,
+  onReset,
+}: {
+  state: StudyState;
+  accounts: DashboardAccount[];
+  activeAccountId: string;
+  updateState: (updater: (current: StudyState) => StudyState) => void;
+  onSwitchAccount: (accountId: string) => void;
+  onAddAccount: (name: string) => boolean;
+  onRenameAccount: (accountId: string, name: string) => boolean;
+  onDeleteAccount: (accountId: string) => void;
+  onExport: () => void;
+  onImport: () => void;
+  onReset: () => void;
+}) {
   const [customMode, setCustomMode] = useState<"light" | "dark">("light");
+  const [newAccountName, setNewAccountName] = useState("");
+  const [accountNames, setAccountNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name])));
+  }, [accounts]);
+  function addNewAccount(event: React.FormEvent) {
+    event.preventDefault();
+    if (onAddAccount(newAccountName)) setNewAccountName("");
+  }
+  function commitAccountName(account: DashboardAccount) {
+    const draft = accountNames[account.id] ?? account.name;
+    if (!onRenameAccount(account.id, draft)) {
+      setAccountNames((current) => ({ ...current, [account.id]: account.name }));
+    }
+  }
   function updateProfile(key: keyof StudyState["profile"], value: string | number) {
     updateState((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
   }
@@ -1460,6 +1741,61 @@ function SettingsView({ state, updateState, onExport, onImport, onReset }: { sta
   }
   return (
     <div className="page-stack settings-page">
+      <section className="panel settings-card account-settings-card">
+        <div className="panel-heading">
+          <div><p className="card-kicker">研友空间</p><h2>账号管理</h2></div>
+          <div className="account-count"><Users size={18} /><span>{accounts.length} 个账号</span></div>
+        </div>
+        <p className="settings-copy">每个账号拥有完全独立的目标、科目、计划和时间记录。顶部可随时快速切换，页面只会显示当前账号的数据，适合在同一台设备上轮流记录和监督进度。</p>
+        <form className="account-add-form" onSubmit={addNewAccount}>
+          <label>
+            <span>新增研友账号</span>
+            <input
+              value={newAccountName}
+              maxLength={30}
+              placeholder="输入姓名或昵称"
+              onChange={(event) => setNewAccountName(event.target.value)}
+            />
+          </label>
+          <button className="primary-button" type="submit"><UserPlus size={17} />新增并切换</button>
+        </form>
+        <div className="account-list">
+          {accounts.map((account) => {
+            const active = account.id === activeAccountId;
+            return (
+              <article className={active ? "active" : ""} key={account.id}>
+                <div className="account-avatar" aria-hidden="true">
+                  {(accountNames[account.id] ?? account.name).trim().slice(0, 1).toLocaleUpperCase() || "研"}
+                </div>
+                <label>
+                  <span>账号名称</span>
+                  <input
+                    value={accountNames[account.id] ?? account.name}
+                    maxLength={30}
+                    onChange={(event) => setAccountNames((current) => ({
+                      ...current,
+                      [account.id]: event.target.value,
+                    }))}
+                    onBlur={() => commitAccountName(account)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                  />
+                </label>
+                <div className="account-meta">
+                  {active
+                    ? <strong>当前账号</strong>
+                    : <span>上次切换 {new Date(account.lastActiveAt).toLocaleDateString("zh-CN")}</span>}
+                </div>
+                <div className="account-actions">
+                  {!active && <button type="button" className="secondary-button" onClick={() => onSwitchAccount(account.id)}>切换</button>}
+                  {!active && <button type="button" className="danger-button" onClick={() => onDeleteAccount(account.id)}><Trash2 size={15} />删除</button>}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
       <section className="panel settings-card">
         <div className="panel-heading"><div><p className="card-kicker">项目基线</p><h2>考研目标</h2></div><Save size={19} /></div>
         <div className="form-grid">

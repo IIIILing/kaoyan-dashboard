@@ -116,6 +116,9 @@ button { color: inherit; }
 .topbar h1 { margin: 3px 0 0; font-size: clamp(24px, 2vw, 31px); letter-spacing: -.035em; }
 .eyebrow, .card-kicker { margin: 0; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
+.account-switcher { min-height: 38px; display: flex; align-items: center; gap: 7px; padding: 3px 5px 3px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface); font-size: 11px; white-space: nowrap; }
+.account-switcher select { width: auto; min-width: 108px; height: 30px; padding: 0 28px 0 8px; border: 0; background-color: var(--bg-soft); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
+.account-switcher select:focus { box-shadow: none; }
 .sync-state { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; color: var(--muted); background: var(--surface); }
 .sync-state.saved { color: var(--success); }
 .sync-state.offline { color: var(--warn); }
@@ -340,6 +343,18 @@ button { color: inherit; }
 .rule-delete:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 
 .settings-card { padding: 26px; }
+.account-count { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; font-weight: 700; }
+.account-settings-card .settings-copy { max-width: 850px; }
+.account-add-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 10px; align-items: end; max-width: 620px; margin: 18px 0; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.account-add-form label > span, .account-list label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.account-list { display: grid; gap: 10px; }
+.account-list article { display: grid; grid-template-columns: 42px minmax(170px, 1fr) minmax(130px, .65fr) auto; gap: 12px; align-items: center; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.account-list article.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--accent-soft); }
+.account-avatar { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--primary); color: #fff; font-size: 16px; font-weight: 800; }
+.account-meta { color: var(--muted); font-size: 10px; }
+.account-meta strong { color: var(--accent); font-size: 11px; }
+.account-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.account-actions .danger-button, .account-actions .secondary-button { min-height: 36px; }
 .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
 .form-grid .wide { grid-column: span 2; }
 .form-grid label > span, .weight-grid label > span, .dialog-grid label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
@@ -435,6 +450,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .mobile-menu { display: grid; margin-right: 12px; }
   .topbar { justify-content: flex-start; }
   .topbar-actions { margin-left: auto; }
+  .account-switcher > span { display: none; }
   .sync-state span { display: none; }
   .hero-grid, .content-grid, .subject-detail-grid, .period-score-grid { grid-template-columns: 1fr; }
   .record-cta { grid-column: auto; }
@@ -449,6 +465,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .subject-settings-list article { grid-template-columns: 1fr 1fr 80px 70px; }
   .subject-settings-list .subject-note-field { grid-column: 1 / span 3; }
   .life-activity-settings-list article { grid-template-columns: 12px 1fr 70px 34px; }
+  .account-list article { grid-template-columns: 42px 1fr auto; }
+  .account-list .account-meta { grid-column: 2; }
+  .account-list .account-actions { grid-column: 3; grid-row: 1 / span 2; }
   .resource-add-form { grid-template-columns: 100px 1fr; }
   .resource-add-form .primary-button { grid-column: 2; }
 }
@@ -458,6 +477,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .topbar { min-height: 86px; margin-bottom: 18px; }
   .topbar h1 { font-size: 21px; }
   .eyebrow { display: none; }
+  .account-switcher { padding-left: 6px; }
+  .account-switcher > svg { display: none; }
+  .account-switcher select { min-width: 82px; max-width: 108px; }
+  .sync-state { display: none; }
   .countdown-line { justify-content: flex-start; }
   .hero-grid, .subject-grid, .summary-strip, .form-grid, .weight-grid, .guide-grid, .standards-grid, .score-weight-grid, .routine-metric-grid { grid-template-columns: 1fr; }
   .score-card { align-items: flex-start; }
@@ -487,6 +510,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .phase-editor-basics, .palette-grid, .color-picker-grid { grid-template-columns: 1fr; }
   .sidebar-icon-setting { grid-template-columns: 1fr; }
   .sidebar-icon-actions { flex-wrap: wrap; }
+  .account-add-form { grid-template-columns: 1fr; }
+  .account-add-form .primary-button { width: 100%; }
+  .account-list article { grid-template-columns: 38px minmax(0, 1fr); }
+  .account-avatar { width: 38px; height: 38px; }
+  .account-list .account-meta { grid-column: 2; }
+  .account-list .account-actions { grid-column: 1 / span 2; grid-row: auto; }
+  .account-list .account-actions > button { flex: 1; }
   .resource-add-form { grid-template-columns: 1fr; }
   .resource-add-form .primary-button { grid-column: auto; }
   .resource-row { grid-template-columns: 22px 50px 1fr 30px; }
