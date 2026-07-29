@@ -274,7 +274,66 @@ button { color: inherit; }
 .phase-row { display: grid; grid-template-columns: 120px 1fr 43px; gap: 12px; align-items: center; }
 .phase-row span { display: block; font-size: 12px; font-weight: 700; }
 .phase-row small { display: block; margin-top: 3px; color: var(--faint); font-size: 9px; }
-.phase-row input[type="range"] { accent-color: var(--range-color); width: 100%; }
+.phase-row input[type="range"] {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.phase-row input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--range-color) 0%,
+    var(--range-color) var(--range-progress),
+    var(--bg-soft) var(--range-progress),
+    var(--bg-soft) 100%
+  );
+}
+.phase-row input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--range-color);
+  cursor: grab;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.phase-row input[type="range"]::-moz-range-track {
+  width: 100%;
+  height: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--range-color) 0%,
+    var(--range-color) var(--range-progress),
+    var(--bg-soft) var(--range-progress),
+    var(--bg-soft) 100%
+  );
+}
+.phase-row input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--range-color);
+  cursor: grab;
+}
+.phase-row input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; }
+.phase-row input[type="range"]:active::-moz-range-thumb { cursor: grabbing; }
+.phase-row input[type="range"]:focus-visible { outline: 2px solid var(--range-color); outline-offset: 2px; }
 .phase-row > strong { font-size: 11px; text-align: right; }
 .phase-open { min-width: 0; padding: 4px 5px; border: 0; border-radius: 5px; background: transparent; text-align: left; cursor: pointer; }
 .phase-open:hover { color: var(--accent); background: var(--bg-soft); }

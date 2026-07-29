@@ -1369,7 +1369,10 @@ function SubjectsView({ state, updateState }: { state: StudyState; updateState: 
                   <input type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
                     const value = Number(event.target.value);
                     updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? { ...p, progress: value } : p) } : item) }));
-                  }} style={{ "--range-color": subject.accent } as React.CSSProperties} />
+                  }} style={{
+                    "--range-color": subject.accent,
+                    "--range-progress": `${Math.min(100, Math.max(0, phase.progress))}%`,
+                  } as React.CSSProperties} />
                   <strong>{phase.progress}%</strong>
                 </div>
               ))}
