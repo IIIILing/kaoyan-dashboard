@@ -96,11 +96,15 @@ button { color: inherit; }
 }
 :root[data-theme="dark"] .sidebar { background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--primary) 58%, var(--sidebar-end) 100%); }
 .app-shell.sidebar-hidden .sidebar { transform: translateX(-102%); box-shadow: 18px 0 50px rgba(0,0,0,.14); }
-.brand-block { display: flex; align-items: center; gap: 12px; padding: 3px 9px 29px; }
+.sidebar-topbar { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: start; gap: 8px; padding: 3px 5px 27px 9px; }
+.brand-block { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.brand-block > div:last-child { min-width: 0; }
 .brand-mark { width: 39px; height: 39px; display: grid; place-items: center; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); border-radius: 9px; font-weight: 800; font-size: 20px; }
 .brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 8px; }
-.brand-block strong { display: block; font-size: 20px; letter-spacing: .02em; }
+.brand-block strong { overflow: hidden; display: block; font-size: 17px; letter-spacing: .015em; white-space: nowrap; text-overflow: ellipsis; }
 .brand-block span { display: block; margin-top: 4px; color: rgba(255,255,255,.66); font-size: 11px; }
+.sidebar-collapse-toggle { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.2); border-radius: 7px; color: rgba(255,255,255,.82); background: rgba(255,255,255,.09); cursor: pointer; transition: .16s ease; }
+.sidebar-collapse-toggle:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.16); }
 .nav-list { display: grid; gap: 6px; }
 .nav-list button { width: 100%; display: flex; align-items: center; gap: 13px; border: 0; background: transparent; color: rgba(255,255,255,.78); padding: 12px 14px; border-radius: 8px; cursor: pointer; text-align: left; font-weight: 600; transition: .16s ease; }
 .nav-list button:hover { background: rgba(255,255,255,.08); color: #fff; }
@@ -126,8 +130,10 @@ button { color: inherit; }
 .sync-state { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; color: var(--muted); background: var(--surface); }
 .sync-state.saved { color: var(--success); }
 .sync-state.offline { color: var(--warn); }
-.theme-toggle, .mobile-menu, .sidebar-visibility-toggle { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: .16s ease; }
-.theme-toggle:hover, .sidebar-visibility-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--surface-hover); }
+.theme-toggle, .mobile-menu, .sidebar-reveal-toggle { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: .16s ease; }
+.theme-toggle:hover, .sidebar-reveal-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--surface-hover); }
+.sidebar-reveal-toggle { position: fixed; top: 33px; left: 20px; z-index: 38; }
+.app-shell.sidebar-hidden .topbar-leading { padding-left: 50px; }
 .mobile-menu { display: none; }
 .page-stack { display: grid; gap: 20px; max-width: 1500px; margin: 0 auto; }
 .narrow-page, .settings-page { max-width: 1120px; }
@@ -664,7 +670,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .sidebar { transform: translateX(-102%); transition: transform .2s ease; box-shadow: 18px 0 50px rgba(0,0,0,.2); }
   .sidebar.is-open, .app-shell.sidebar-hidden .sidebar.is-open { transform: translateX(0); }
   .main-area { margin-left: 0; padding-inline: 18px; }
-  .sidebar-visibility-toggle { display: none; }
+  .sidebar-reveal-toggle { display: none; }
+  .app-shell.sidebar-hidden .topbar-leading { padding-left: 0; }
   .mobile-menu { display: grid; margin-right: 12px; }
   .topbar { justify-content: flex-start; }
   .topbar-actions { margin-left: auto; }

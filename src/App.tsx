@@ -990,12 +990,16 @@ export default function Dashboard() {
 
   return (
     <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""}`}>
+      {sidebarHidden && <button className="sidebar-reveal-toggle" type="button" onClick={() => setSidebarHidden(false)} aria-label="展开侧栏" title="展开侧栏"><PanelLeftOpen size={18} /></button>}
       <aside className={`sidebar ${mobileNavOpen ? "is-open" : ""}`}>
-        <div className="brand-block">
-          <div className="brand-mark">
-            {state.profile.sidebarIcon ? <img src={state.profile.sidebarIcon} alt="侧栏图标" /> : "Z"}
+        <div className="sidebar-topbar">
+          <div className="brand-block">
+            <div className="brand-mark">
+              {state.profile.sidebarIcon ? <img src={state.profile.sidebarIcon} alt="侧栏图标" /> : "Z"}
+            </div>
+            <div><strong>{state.profile.sidebarTitle}</strong><span>{state.profile.sidebarSubtitle}</span></div>
           </div>
-          <div><strong>{state.profile.sidebarTitle}</strong><span>{state.profile.sidebarSubtitle}</span></div>
+          <button className="sidebar-collapse-toggle" type="button" onClick={() => { setSidebarHidden(true); setMobileNavOpen(false); }} aria-label="隐藏侧栏" title="隐藏侧栏"><PanelLeftClose size={18} /></button>
         </div>
         <nav className="nav-list" aria-label="主要导航">
           {NAV.map((item) => {
@@ -1030,7 +1034,6 @@ export default function Dashboard() {
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-leading">
-            <button className="sidebar-visibility-toggle" type="button" onClick={() => setSidebarHidden((hidden) => !hidden)} aria-label={sidebarHidden ? "展开侧栏" : "隐藏侧栏"} title={sidebarHidden ? "展开侧栏" : "隐藏侧栏"}>{sidebarHidden ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
             <button className="mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label="打开导航">☰</button>
             <div>
               <p className="eyebrow">{viewTitle}</p>
