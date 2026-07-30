@@ -989,7 +989,7 @@ export default function Dashboard() {
   const activeAccount = accounts.find((account) => account.id === activeAccountId);
 
   return (
-    <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""}`}>
+    <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""} ${view === "timer" ? "timer-view" : ""}`}>
       {sidebarHidden && <button className="sidebar-reveal-toggle" type="button" onClick={() => setSidebarHidden(false)} aria-label="展开侧栏" title="展开侧栏"><PanelLeftOpen size={18} /></button>}
       <aside className={`sidebar ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="sidebar-topbar">
@@ -1097,6 +1097,7 @@ export default function Dashboard() {
             sidebarHidden={sidebarHidden}
             onSidebarHiddenChange={setSidebarHidden}
             onSaveSessions={addTimerSessions}
+            onExit={() => setView("overview")}
           />
         )}
         {view === "records" && (
