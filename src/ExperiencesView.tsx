@@ -152,15 +152,13 @@ export default function ExperiencesView({ state, updateState }: Props) {
     reader.readAsText(file);
   }
 
-  const fastest = state.experiences.find((item) => item.id === state.fastestExperienceId);
-
   return (
     <div className="page-stack experience-page">
       <section className="panel experience-hero">
         <div>
           <p className="card-kicker">结构化经验库</p>
           <h2>{state.experiences.length} 位考生 · {state.experiences.reduce((sum, item) => sum + item.subjects.length, 0)} 份科目经验</h2>
-          <p>当前动态进度基准：<strong>{fastest?.title ?? "未选择"}</strong>。默认三篇均来自白皮书第 48–56 页，原文明确值与推断日期分开标记。</p>
+          <p>集中管理不同院校、专业与科目的备考经验。每条经验都可自由配置科目与阶段，并可任选一条作为动态进度参考。</p>
         </div>
         <div className="heading-actions">
           <button className="primary-button" onClick={addExperience}><Plus size={16} />新增经验</button>
