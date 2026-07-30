@@ -832,6 +832,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .focus-stage-status i.status-paused { background: #e9b85b; }
 .focus-settings-buttons { display: flex; align-items: center; gap: 7px; }
 .focus-settings-buttons button { min-height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 13px; border-radius: 12px; font-size: 10px; font-weight: 650; letter-spacing: -.01em; }
+.focus-settings-buttons button.active { color: #0071e3; border-color: rgba(0,113,227,.4); background: rgba(0,113,227,.12); }
+.focus-effect-glass .focus-settings-buttons button.active { color: #b85f43; border-color: rgba(184,95,67,.38); background: rgba(192,107,79,.12); }
 .focus-stage-status button:hover,
 .focus-settings-buttons button:hover,
 .focus-main-controls button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.04); }

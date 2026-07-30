@@ -53,6 +53,7 @@ type StoredTimer = {
   flipLineWidth: number;
   customEffects: CustomEffect[];
   builtInBackgrounds: Partial<Record<BuiltInEffectId, BackgroundSettings>>;
+  showSecondsByEffect: Record<string, boolean>;
   activeMs: number;
   restMs: number;
   startedAt: number | null;
@@ -119,6 +120,9 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
       flipLineWidth: Math.max(1, Math.min(16, Number(parsed.flipLineWidth) || 2)),
       customEffects,
       builtInBackgrounds: parsed.builtInBackgrounds && typeof parsed.builtInBackgrounds === "object" ? parsed.builtInBackgrounds : {},
+      showSecondsByEffect: parsed.showSecondsByEffect && typeof parsed.showSecondsByEffect === "object"
+        ? Object.fromEntries(Object.entries(parsed.showSecondsByEffect).filter(([, value]) => typeof value === "boolean"))
+        : {},
       activeMs: Math.max(0, Number(parsed.activeMs) || 0),
       restMs: Math.max(0, Number(parsed.restMs) || 0),
       startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : null,
@@ -223,6 +227,7 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   const [flipLineWidth, setFlipLineWidth] = useState(initial?.flipLineWidth ?? 2);
   const [customEffects, setCustomEffects] = useState<CustomEffect[]>(initial?.customEffects ?? []);
   const [builtInBackgrounds, setBuiltInBackgrounds] = useState<Partial<Record<BuiltInEffectId, BackgroundSettings>>>(initial?.builtInBackgrounds ?? {});
+  const [showSecondsByEffect, setShowSecondsByEffect] = useState<Record<string, boolean>>(initial?.showSecondsByEffect ?? {});
   const [activeMs, setActiveMs] = useState(initial?.activeMs ?? 0);
   const [restMs, setRestMs] = useState(initial?.restMs ?? 0);
   const [startedAt, setStartedAt] = useState<number | null>(initial?.startedAt ?? null);
@@ -242,17 +247,19 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   useEffect(() => {
     const snapshot: StoredTimer = {
       mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes,
-      flipLineWidth, customEffects, builtInBackgrounds, activeMs, restMs, startedAt, endedAt, transitionAt,
+      flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt,
     };
     window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
-  }, [storageKey, mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes, flipLineWidth, customEffects, builtInBackgrounds, activeMs, restMs, startedAt, endedAt, transitionAt]);
+  }, [storageKey, mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes, flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt]);
 
   const effectiveActiveMs = activeMs + (status === "running" && transitionAt ? Math.max(0, now - transitionAt) : 0);
   const effectiveRestMs = restMs + (status === "paused" && transitionAt ? Math.max(0, now - transitionAt) : 0);
   const targetMs = mode === "countdown" ? countdownMinutes * 60_000 : mode === "pomodoro" ? pomodoroFocusMinutes * 60_000 : null;
-  const displayedMs = targetMs === null ? effectiveActiveMs : Math.max(0, targetMs - effectiveActiveMs);
-  const displayText = clockText(displayedMs, targetMs !== null);
+  const remainingMs = targetMs === null ? null : Math.max(0, targetMs - effectiveActiveMs);
+  const displayText = clockText(effectiveActiveMs);
   const displayParts = displayText.split(":");
+  const showSeconds = showSecondsByEffect[effectId] ?? false;
+  const visibleDisplayParts = showSeconds ? displayParts : displayParts.slice(0, 2);
   const customEffect = customEffects.find((effect) => effect.id === effectId);
   const effectBase: EffectBase = customEffect?.base ?? (BUILT_IN_EFFECTS.some((item) => item.id === effectId) ? effectId as BuiltInEffectId : "minimal");
   const activeBackground = customEffect?.background ?? builtInBackgrounds[effectBase as BuiltInEffectId] ?? AUTO_BACKGROUND;
@@ -315,6 +322,7 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   function deleteCustomEffect(id: string) {
     if (!window.confirm("确定删除这个自定义效果？")) return;
     setCustomEffects((items) => items.filter((item) => item.id !== id));
+    setShowSecondsByEffect((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     if (effectId === id) setEffectId("minimal");
   }
 
@@ -327,18 +335,19 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
             <button type="button" onClick={() => setSettingsDialog("mode")}><Settings2 size={17} /><span>{modeName(mode)}</span></button>
             <button type="button" onClick={() => setSettingsDialog("duration")}><TimerReset size={17} /><span>时长</span></button>
             <button type="button" onClick={() => setSettingsDialog("effects")}><Palette size={17} /><span>{effectName(effectId, customEffects)}</span></button>
+            <button type="button" className={showSeconds ? "active" : ""} onClick={() => setShowSecondsByEffect((items) => ({ ...items, [effectId]: !showSeconds }))} title={showSeconds ? "隐藏秒数" : "显示精确秒数"} aria-pressed={showSeconds}><Clock3 size={17} /><span>{showSeconds ? "隐藏秒数" : "显示秒数"}</span></button>
             <button type="button" onClick={() => setSettingsDialog("background")}><ImageIcon size={17} /><span>背景</span></button>
           </div>
         </header>
 
         <div className="focus-clock-face">
-          {effectBase === "minimal" && <div className="dual-clock-face"><div className="dual-clock-card"><span>{displayParts[0]}</span></div><div className="dual-clock-card"><span>{displayParts[1]}</span></div><small>秒 {displayParts[2]}</small></div>}
-          {effectBase === "flip" && <div className="flip-clock-face">{displayParts.map((part, index) => <div className="flip-clock-group" key={`${index}-${part}`}><div className="flip-clock-card"><span>{part}</span></div>{index < displayParts.length - 1 && <b>:</b>}</div>)}</div>}
-          {effectBase === "glass" && <div className="glass-clock-face"><p>{dateLabel}</p><time>{displayText}</time><strong>{modeName(mode)}</strong></div>}
+          {effectBase === "minimal" && <div className="dual-clock-face"><div className="dual-clock-card"><span>{displayParts[0]}</span></div><div className="dual-clock-card"><span>{displayParts[1]}</span></div>{showSeconds && <small>秒 {displayParts[2]}</small>}</div>}
+          {effectBase === "flip" && <div className={`flip-clock-face ${showSeconds ? "with-seconds" : ""}`}>{visibleDisplayParts.map((part, index) => <div className="flip-clock-group" key={`${index}-${part}`}><div className="flip-clock-card"><span>{part}</span></div>{index < visibleDisplayParts.length - 1 && <b>:</b>}</div>)}</div>}
+          {effectBase === "glass" && <div className="glass-clock-face"><p>{dateLabel}</p><time>{showSeconds ? displayText : displayText.slice(0, 5)}</time><strong>{modeName(mode)}</strong></div>}
         </div>
 
         <footer className="focus-stage-footer">
-          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
+          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
           <div className="focus-main-controls">
             <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "paused" ? "继续" : "开始"}</span></button>
             <button type="button" onClick={pauseTimer} disabled={status !== "running"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
