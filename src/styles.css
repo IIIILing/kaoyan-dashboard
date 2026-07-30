@@ -92,8 +92,10 @@ button { color: inherit; }
   background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--primary) 55%, var(--sidebar-end) 100%);
   color: var(--sidebar-text);
   z-index: 30;
+  transition: transform .24s ease, box-shadow .24s ease;
 }
 :root[data-theme="dark"] .sidebar { background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--primary) 58%, var(--sidebar-end) 100%); }
+.app-shell.sidebar-hidden .sidebar { transform: translateX(-102%); box-shadow: 18px 0 50px rgba(0,0,0,.14); }
 .brand-block { display: flex; align-items: center; gap: 12px; padding: 3px 9px 29px; }
 .brand-mark { width: 39px; height: 39px; display: grid; place-items: center; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); border-radius: 9px; font-weight: 800; font-size: 20px; }
 .brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 8px; }
@@ -111,8 +113,10 @@ button { color: inherit; }
 .mini-target strong { display: block; margin-top: 2px; font-size: 14px; }
 .sidebar-footer p { line-height: 1.6; margin: 10px 0 0; }
 
-.main-area { min-height: 100vh; margin-left: 246px; padding: 0 38px 46px; }
+.main-area { min-height: 100vh; margin-left: 246px; padding: 0 38px 46px; transition: margin-left .24s ease; }
+.app-shell.sidebar-hidden .main-area { margin-left: 0; }
 .topbar { min-height: 104px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
+.topbar-leading { min-width: 0; display: flex; align-items: center; gap: 14px; }
 .topbar h1 { margin: 3px 0 0; font-size: clamp(24px, 2vw, 31px); letter-spacing: -.035em; }
 .eyebrow, .card-kicker { margin: 0; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
@@ -122,8 +126,8 @@ button { color: inherit; }
 .sync-state { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; color: var(--muted); background: var(--surface); }
 .sync-state.saved { color: var(--success); }
 .sync-state.offline { color: var(--warn); }
-.theme-toggle, .mobile-menu { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: .16s ease; }
-.theme-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--surface-hover); }
+.theme-toggle, .mobile-menu, .sidebar-visibility-toggle { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: .16s ease; }
+.theme-toggle:hover, .sidebar-visibility-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--surface-hover); }
 .mobile-menu { display: none; }
 .page-stack { display: grid; gap: 20px; max-width: 1500px; margin: 0 auto; }
 .narrow-page, .settings-page { max-width: 1120px; }
@@ -553,6 +557,98 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .conflict-policy strong { font-size: 12px; }
 .conflict-policy p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
 
+.timer-page { max-width: 1320px; }
+.timer-intro { min-height: 104px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 21px 24px; }
+.timer-intro h2 { margin: 5px 0 7px; font-size: 21px; letter-spacing: -.025em; }
+.timer-intro p:not(.card-kicker) { max-width: 760px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.timer-intro .secondary-button { white-space: nowrap; }
+.timer-mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.timer-mode-tabs > button { min-height: 70px; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface); box-shadow: var(--shadow); text-align: left; cursor: pointer; transition: .16s ease; }
+.timer-mode-tabs > button > span { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 9px; background: var(--bg-soft); color: var(--faint); }
+.timer-mode-tabs > button strong, .timer-mode-tabs > button small { display: block; }
+.timer-mode-tabs > button strong { color: var(--text); font-size: 13px; }
+.timer-mode-tabs > button small { margin-top: 4px; font-size: 9px; }
+.timer-mode-tabs > button:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-1px); }
+.timer-mode-tabs > button.active { border-color: color-mix(in srgb, var(--accent) 62%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface)); }
+.timer-mode-tabs > button.active > span { color: var(--accent); background: var(--accent-soft); }
+.timer-mode-tabs > button:disabled { cursor: default; opacity: .72; }
+.timer-workspace { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .72fr); gap: 16px; align-items: stretch; }
+.desktop-clock { position: relative; min-height: 520px; overflow: hidden; display: flex; justify-content: space-between; flex-direction: column; padding: 27px 30px 29px; border-radius: 22px; isolation: isolate; box-shadow: 0 24px 60px rgba(16, 33, 48, .16); }
+.desktop-clock::before, .desktop-clock::after { content: ""; position: absolute; z-index: -1; border-radius: 999px; filter: blur(4px); pointer-events: none; }
+.desktop-clock::before { width: 360px; height: 360px; left: -120px; top: -170px; }
+.desktop-clock::after { width: 300px; height: 300px; right: -90px; bottom: -150px; }
+.clock-mist { color: #f7fbff; background: radial-gradient(circle at 18% 14%, rgba(255,255,255,.26), transparent 31%), linear-gradient(145deg, #628da7 0%, #345b79 48%, #1b334b 100%); border: 1px solid rgba(255,255,255,.22); }
+.clock-mist::before { background: rgba(190, 228, 242, .26); }
+.clock-mist::after { background: rgba(16, 41, 66, .44); }
+.clock-midnight { color: #eef8ff; background: radial-gradient(circle at 50% 42%, rgba(31, 104, 148, .24), transparent 37%), linear-gradient(150deg, #05070d 0%, #101b2c 52%, #07111d 100%); border: 1px solid #263a51; box-shadow: 0 25px 75px rgba(2, 7, 14, .38); }
+.clock-midnight::before { background: rgba(45, 146, 205, .24); box-shadow: 300px 170px 90px rgba(25, 84, 140, .2); }
+.clock-midnight::after { background: rgba(65, 79, 212, .14); }
+.clock-sunrise { color: #fffdf8; background: radial-gradient(circle at 72% 18%, rgba(255,255,255,.34), transparent 28%), linear-gradient(145deg, #bb6f68 0%, #c98568 40%, #88607a 100%); border: 1px solid rgba(255,255,255,.25); }
+.clock-sunrise::before { background: rgba(255, 211, 155, .26); }
+.clock-sunrise::after { background: rgba(91, 50, 94, .28); }
+.desktop-clock-top { display: flex; justify-content: space-between; gap: 16px; color: rgba(255,255,255,.67); font-size: 10px; font-weight: 750; letter-spacing: .16em; }
+.desktop-clock-center { display: grid; place-items: center; margin: auto 0; text-align: center; }
+.desktop-clock-center > p { margin: 0 0 10px; color: rgba(255,255,255,.74); font-size: 14px; font-weight: 600; }
+.desktop-clock-center > time { display: block; font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif; font-size: clamp(64px, 7.4vw, 112px); font-weight: 270; line-height: .96; letter-spacing: -.07em; font-variant-numeric: tabular-nums; text-shadow: 0 8px 30px rgba(0,0,0,.16); }
+.clock-midnight .desktop-clock-center > time { color: #f0fbff; text-shadow: 0 0 32px rgba(97, 199, 255, .22); }
+.clock-sunrise .desktop-clock-center > time { font-family: Georgia, "Times New Roman", serif; font-weight: 400; letter-spacing: -.055em; }
+.timer-status { display: inline-flex; align-items: center; gap: 8px; margin-top: 21px; padding: 8px 13px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; background: rgba(10,20,30,.14); backdrop-filter: blur(12px); color: rgba(255,255,255,.82); font-size: 10px; font-weight: 680; }
+.timer-status i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.7); }
+.timer-status.status-running i { background: #81e0ac; box-shadow: 0 0 0 5px rgba(129,224,172,.13); animation: timer-pulse 1.7s ease infinite; }
+.timer-status.status-paused i { background: #f4cb79; }
+.timer-status.status-finished i { background: #9dc7e6; }
+@keyframes timer-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.desktop-clock-bottom { display: flex; align-items: end; gap: 34px; }
+.desktop-clock-bottom div { min-width: 112px; }
+.desktop-clock-bottom span, .desktop-clock-bottom strong { display: block; }
+.desktop-clock-bottom span { margin-bottom: 6px; color: rgba(255,255,255,.58); font-size: 9px; letter-spacing: .06em; }
+.desktop-clock-bottom strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.timer-side-panel { min-width: 0; display: grid; align-content: stretch; grid-template-rows: auto 1fr; gap: 16px; }
+.timer-config-card, .timer-style-card { padding: 21px; }
+.timer-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.timer-card-heading h3 { margin: 5px 0 0; font-size: 16px; }
+.timer-card-heading > svg { color: var(--accent); }
+.timer-config-copy { margin: 24px 0 0; color: var(--muted); font-size: 11px; line-height: 1.8; }
+.timer-number-field { display: block; margin-top: 20px; }
+.timer-number-field > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.timer-number-field input { height: 44px; font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.pomodoro-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.timer-presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.timer-presets button { min-height: 31px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--bg-soft); cursor: pointer; font-size: 9px; font-weight: 700; }
+.timer-presets button:hover:not(:disabled), .timer-presets button.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.timer-presets button:disabled { cursor: default; opacity: .55; }
+.timer-config-note { margin: 12px 0 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
+.timer-style-card { display: flex; flex-direction: column; }
+.clock-style-list { display: grid; gap: 8px; margin-top: 18px; }
+.clock-style-list > button { position: relative; display: grid; grid-template-columns: 58px minmax(0, 1fr) 18px; align-items: center; gap: 11px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--surface-strong); text-align: left; cursor: pointer; }
+.clock-style-list > button:hover, .clock-style-list > button.active { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); background: var(--surface-hover); }
+.clock-style-list > button > svg { color: var(--accent); }
+.clock-style-list strong, .clock-style-list small { display: block; }
+.clock-style-list strong { color: var(--text); font-size: 11px; }
+.clock-style-list small { margin-top: 3px; font-size: 8px; }
+.clock-style-preview { width: 58px; height: 42px; display: grid; place-items: center; border-radius: 7px; color: #fff; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.preview-mist { background: linear-gradient(140deg, #77a1b9, #294d6a); }
+.preview-midnight { background: radial-gradient(circle, #16354b, #060910); color: #dff7ff; }
+.preview-sunrise { background: linear-gradient(140deg, #c77968, #795772); font-family: Georgia, serif; }
+.timer-controls { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 18px; }
+.timer-control-buttons { display: flex; align-items: center; gap: 8px; }
+.timer-control-buttons button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 17px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface-strong); cursor: pointer; font-size: 11px; font-weight: 750; }
+.timer-control-buttons button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--surface-hover); }
+.timer-control-buttons button:disabled { cursor: default; opacity: .38; }
+.timer-control-buttons .timer-start { color: #fff; border-color: var(--accent); background: var(--accent); }
+.timer-control-buttons .timer-start:hover:not(:disabled) { color: #fff; background: var(--primary-hover); }
+.timer-control-buttons .timer-finish { color: var(--danger); }
+.timer-control-buttons .timer-reset { color: var(--muted); }
+.timer-controls > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; text-align: right; }
+.timer-completion-dialog { width: min(720px, 100%); }
+.timer-session-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-bottom: 18px; }
+.timer-session-summary > div { padding: 13px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.timer-session-summary span, .timer-session-summary strong { display: block; }
+.timer-session-summary span { margin-bottom: 6px; color: var(--muted); font-size: 9px; }
+.timer-session-summary strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+.timer-rest-notice { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 11px 13px; border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--success) 10%, var(--surface)); font-size: 10px; line-height: 1.6; }
+.timer-rest-notice svg { flex: 0 0 auto; color: var(--success); }
+
 @media (max-width: 1160px) {
   .main-area { padding-inline: 24px; }
   .hero-grid { grid-template-columns: repeat(2, 1fr); }
@@ -560,12 +656,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .subject-grid { grid-template-columns: repeat(2, 1fr); }
   .experience-layout { grid-template-columns: 210px minmax(0, 1fr); }
   .milestone-date, .milestone-meta { grid-column: span 6; }
+  .timer-workspace { grid-template-columns: 1fr; }
+  .timer-side-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
 }
 
 @media (max-width: 860px) {
   .sidebar { transform: translateX(-102%); transition: transform .2s ease; box-shadow: 18px 0 50px rgba(0,0,0,.2); }
-  .sidebar.is-open { transform: translateX(0); }
+  .sidebar.is-open, .app-shell.sidebar-hidden .sidebar.is-open { transform: translateX(0); }
   .main-area { margin-left: 0; padding-inline: 18px; }
+  .sidebar-visibility-toggle { display: none; }
   .mobile-menu { display: grid; margin-right: 12px; }
   .topbar { justify-content: flex-start; }
   .topbar-actions { margin-left: auto; }
@@ -594,6 +693,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .account-list .account-actions { grid-column: 3; grid-row: 1 / span 2; }
   .resource-add-form { grid-template-columns: 100px 1fr; }
   .resource-add-form .primary-button { grid-column: 2; }
+  .timer-intro { align-items: flex-start; }
 }
 
 @media (max-width: 580px) {
@@ -605,6 +705,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .account-switcher > svg { display: none; }
   .account-switcher select { min-width: 82px; max-width: 108px; }
   .sync-state { display: none; }
+  .timer-intro { align-items: stretch; flex-direction: column; padding: 18px; }
+  .timer-intro .secondary-button { width: 100%; }
+  .timer-mode-tabs { grid-template-columns: 1fr; }
+  .timer-mode-tabs > button { min-height: 62px; }
+  .timer-side-panel { grid-template-columns: 1fr; }
+  .desktop-clock { min-height: 410px; padding: 22px 19px; border-radius: 16px; }
+  .desktop-clock-center > time { font-size: clamp(46px, 14vw, 66px); }
+  .desktop-clock-bottom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .desktop-clock-bottom div { min-width: 0; }
+  .timer-controls { align-items: stretch; flex-direction: column; }
+  .timer-control-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .timer-control-buttons button { padding-inline: 10px; }
+  .timer-controls > p { text-align: left; }
+  .timer-session-summary { grid-template-columns: 1fr; }
+  .timer-completion-dialog .dialog-footer { align-items: stretch; flex-direction: column; }
+  .timer-completion-dialog .dialog-footer > div { display: grid; grid-template-columns: 1fr 1fr; }
   .countdown-line { justify-content: flex-start; }
   .hero-grid, .subject-grid, .summary-strip, .form-grid, .weight-grid, .guide-grid, .standards-grid, .score-weight-grid, .routine-metric-grid { grid-template-columns: 1fr; }
   .score-card { align-items: flex-start; }

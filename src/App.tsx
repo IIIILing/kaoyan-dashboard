@@ -14,6 +14,8 @@ import {
   Moon,
   NotebookText,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   RotateCcw,
@@ -54,6 +56,7 @@ import {
   normalizeExperiences,
 } from "./experience-data";
 import ExperiencesView from "./ExperiencesView";
+import TimerView from "./TimerView";
 import {
   createScheduleArchive,
   mergeImportedPlans,
@@ -65,7 +68,7 @@ import {
   type ScheduleImportCandidate,
 } from "./schedule-data";
 
-type View = "overview" | "today" | "records" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
+type View = "overview" | "today" | "timer" | "records" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
 type DashboardAccount = {
@@ -83,6 +86,7 @@ type AccountRegistry = {
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "overview", label: "总览", icon: Home },
   { id: "today", label: "今日计划", icon: ListTodo },
+  { id: "timer", label: "专注计时", icon: TimerReset },
   { id: "records", label: "时间记录", icon: Clock3 },
   { id: "subjects", label: "科目进度", icon: BookOpen },
   { id: "experiences", label: "经验贴", icon: NotebookText },
@@ -579,6 +583,7 @@ export default function Dashboard() {
   const [planOpen, setPlanOpen] = useState(false);
   const [planEditing, setPlanEditing] = useState<PlanItem | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
   const [importCandidate, setImportCandidate] = useState<ScheduleImportCandidate | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
@@ -776,6 +781,7 @@ export default function Dashboard() {
     setPlanEditing(null);
     setBackupMode(null);
     setImportCandidate(null);
+    setSidebarHidden(false);
     setView("overview");
     setSaveStatus("saved");
   }
@@ -859,6 +865,25 @@ export default function Dashboard() {
     }));
     setRecordEditing(null);
     setRecordOpen(false);
+  }
+
+  function addTimerSessions(sessions: StudySession[]) {
+    if (!sessions.length) return;
+    updateState((current) => {
+      const incomingIds = new Set(sessions.map((session) => session.id));
+      const needsRestCategory = sessions.some((session) => session.subjectId === "rest");
+      const hasRestCategory = current.lifeActivities.some((activity) => activity.id === "rest");
+      const lifeActivities = needsRestCategory
+        ? hasRestCategory
+          ? current.lifeActivities.map((activity) => activity.id === "rest" ? { ...activity, active: true } : activity)
+          : [...current.lifeActivities, { id: "rest", name: "休息", accent: "#7d8790", active: true }]
+        : current.lifeActivities;
+      return {
+        ...current,
+        lifeActivities,
+        sessions: [...current.sessions.filter((session) => !incomingIds.has(session.id)), ...sessions],
+      };
+    });
   }
 
   function openNewRecord() {
@@ -964,7 +989,7 @@ export default function Dashboard() {
   const activeAccount = accounts.find((account) => account.id === activeAccountId);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""}`}>
       <aside className={`sidebar ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="brand-block">
           <div className="brand-mark">
@@ -1004,10 +1029,13 @@ export default function Dashboard() {
 
       <main className="main-area">
         <header className="topbar">
-          <button className="mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label="打开导航">☰</button>
-          <div>
-            <p className="eyebrow">{viewTitle}</p>
-            <h1>{view === "overview" ? `晚上好，${state.profile.name}` : viewTitle}</h1>
+          <div className="topbar-leading">
+            <button className="sidebar-visibility-toggle" type="button" onClick={() => setSidebarHidden((hidden) => !hidden)} aria-label={sidebarHidden ? "展开侧栏" : "隐藏侧栏"} title={sidebarHidden ? "展开侧栏" : "隐藏侧栏"}>{sidebarHidden ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
+            <button className="mobile-menu" onClick={() => setMobileNavOpen((open) => !open)} aria-label="打开导航">☰</button>
+            <div>
+              <p className="eyebrow">{viewTitle}</p>
+              <h1>{view === "overview" ? `晚上好，${state.profile.name}` : viewTitle}</h1>
+            </div>
           </div>
           <div className="topbar-actions">
             <label className="account-switcher">
@@ -1057,6 +1085,15 @@ export default function Dashboard() {
             onEditSession={openEditRecord}
             onDeleteSession={deleteSession}
             onDeletePlan={deletePlanItem}
+          />
+        )}
+        {view === "timer" && (
+          <TimerView
+            state={state}
+            accountId={activeAccountId}
+            sidebarHidden={sidebarHidden}
+            onSidebarHiddenChange={setSidebarHidden}
+            onSaveSessions={addTimerSessions}
           />
         )}
         {view === "records" && (
