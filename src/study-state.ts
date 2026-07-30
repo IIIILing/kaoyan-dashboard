@@ -1,3 +1,5 @@
+import { DEFAULT_FASTEST_EXPERIENCE_ID, defaultExperiences, type ExperiencePost } from "./experience-data";
+
 export type Phase = {
   id: string;
   name: string;
@@ -119,7 +121,7 @@ export type AppearanceSettings = {
 };
 
 export type StudyState = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   profile: {
     name: string;
     target: string;
@@ -144,6 +146,8 @@ export type StudyState = {
   plans: DailyPlan[];
   schedule?: ScheduleDay[];
   planTemplates: PlanTemplate[];
+  experiences: ExperiencePost[];
+  fastestExperienceId: string;
 };
 
 export const defaultLightColors: ThemeColors = {
@@ -187,7 +191,7 @@ export const defaultLifeActivities: LifeActivity[] = [
 ];
 
 export const defaultStudyState: StudyState = {
-  version: 2,
+  version: 3,
   profile: {
     name: "Jimmy",
     target: "2027 浙江大学电气工程专硕",
@@ -230,12 +234,23 @@ export const defaultStudyState: StudyState = {
       shortName: "数一",
       weight: 35,
       accent: "#1565a7",
-      note: "除概率统计外，基础内容已完成一轮",
+      note: "按 427 分快线：7 月中启动，9 月中一轮、10 月底二轮、11 月真题",
       phases: [
-        { id: "math-basic", name: "基础一轮", weight: 30, progress: 85, resources: [] },
-        { id: "math-intense", name: "强化刷题", weight: 30, progress: 0, resources: [] },
-        { id: "math-real", name: "历年真题", weight: 25, progress: 0, resources: [] },
-        { id: "math-mock", name: "模考复盘", weight: 15, progress: 0, resources: [] },
+        { id: "math-basic", name: "第一轮：基础课 + 300/660", weight: 30, progress: 85, resources: [
+          { id: "rapid-math-basic-course", type: "chapter", name: "张宇基础课", detail: "逐节跟例题，课后立即完成对应题", completed: false },
+          { id: "rapid-math-300", type: "exercise", name: "张宇基础 300 题", detail: "暑期基础阶段", completed: false },
+          { id: "rapid-math-660", type: "exercise", name: "李永乐 660 高数部分", detail: "与基础课并行", completed: false },
+        ] },
+        { id: "math-intense", name: "第二轮：强化 30 讲 + 1000", weight: 30, progress: 0, resources: [
+          { id: "rapid-math-30", type: "chapter", name: "张宇强化 30 讲", detail: "每天一节", completed: false },
+          { id: "rapid-math-1000", type: "exercise", name: "张宇 1000 题", detail: "每天 5 小时以上完成对应练习", completed: false },
+        ] },
+        { id: "math-real", name: "08–21 年真题", weight: 25, progress: 0, resources: [
+          { id: "rapid-math-real", type: "paper", name: "08–21 年数学真题", detail: "一天一套并订正；薄弱题型回查 1987–2022 同类题", completed: false },
+        ] },
+        { id: "math-mock", name: "15 套模拟与复盘", weight: 15, progress: 0, resources: [
+          { id: "rapid-math-mock", type: "paper", name: "李林/张宇模拟卷", detail: "状态好一天一套，状态差隔天一套，合计约 15 套", completed: false },
+        ] },
       ],
     },
     {
@@ -244,13 +259,23 @@ export const defaultStudyState: StudyState = {
       shortName: "英一",
       weight: 20,
       accent: "#5b7f70",
-      note: "计划 7 月底完成单词第一轮",
+      note: "按 427 分快线：8–11 月真题一轮，最后三年整卷，考前两周作文",
       phases: [
-        { id: "eng-word-first", name: "单词一轮", weight: 25, progress: 85, resources: [] },
-        { id: "eng-word-second", name: "单词二轮", weight: 25, progress: 0, resources: [] },
-        { id: "eng-real", name: "15 年真题", weight: 30, progress: 0, resources: [] },
-        { id: "eng-mock", name: "模拟卷 20 套", weight: 10, progress: 0, resources: [] },
-        { id: "eng-writing", name: "写作模板", weight: 10, progress: 0, resources: [] },
+        { id: "eng-word-first", name: "词汇补缺（按个人基础）", weight: 15, progress: 85, resources: [
+          { id: "rapid-eng-word", type: "other", name: "个人词汇缺口", detail: "快线作者四级 613、六级 583；基础不同需主动前移", completed: false },
+        ] },
+        { id: "eng-real", name: "01–22 阅读与完形一轮", weight: 35, progress: 0, resources: [
+          { id: "rapid-eng-real", type: "paper", name: "01–22 年真题", detail: "8–11 月完成阅读与完形一轮", completed: false },
+        ] },
+        { id: "eng-translation", name: "近十年翻译", weight: 15, progress: 0, resources: [
+          { id: "rapid-eng-translation", type: "paper", name: "近十年翻译真题", detail: "与阅读阶段并行", completed: false },
+        ] },
+        { id: "eng-mock", name: "最后三年整卷模拟", weight: 20, progress: 0, resources: [
+          { id: "rapid-eng-mock", type: "paper", name: "最后三年真题", detail: "从头到尾含作文整卷模拟", completed: false },
+        ] },
+        { id: "eng-writing", name: "大小作文冲刺", weight: 15, progress: 0, resources: [
+          { id: "rapid-eng-writing", type: "exercise", name: "大小作文", detail: "12 月最后两周每天练一篇大作文或小作文", completed: false },
+        ] },
       ],
     },
     {
@@ -259,12 +284,21 @@ export const defaultStudyState: StudyState = {
       shortName: "政治",
       weight: 15,
       accent: "#b47a32",
-      note: "尚未开始",
+      note: "按 427 分快线：少而精，11 月预测选择、12 月肖四与主观题",
       phases: [
-        { id: "pol-basic", name: "基础课程", weight: 30, progress: 0, resources: [] },
-        { id: "pol-choice", name: "选择题强化", weight: 35, progress: 0, resources: [] },
-        { id: "pol-recite", name: "主观题背诵", weight: 25, progress: 0, resources: [] },
-        { id: "pol-mock", name: "套卷模考", weight: 10, progress: 0, resources: [] },
+        { id: "pol-basic", name: "强化课 + 1000 题", weight: 30, progress: 0, resources: [
+          { id: "rapid-pol-course", type: "chapter", name: "徐涛史纲/马原强化课", detail: "时间足够则完整学习", completed: false },
+          { id: "rapid-pol-1000", type: "exercise", name: "肖秀荣 1000 题", detail: "快线至少完成约一半；基础弱者应尽量全做", completed: false },
+        ] },
+        { id: "pol-choice", name: "肖八与预测卷选择题", weight: 35, progress: 0, resources: [
+          { id: "rapid-pol-choice", type: "paper", name: "肖八 / 腿姐 / 徐涛预测卷", detail: "11 月集中完成选择题", completed: false },
+        ] },
+        { id: "pol-recite", name: "肖四主观题", weight: 25, progress: 0, resources: [
+          { id: "rapid-pol-recite", type: "other", name: "肖四大题", detail: "考前两周集中背诵", completed: false },
+        ] },
+        { id: "pol-mock", name: "肖四选择题与限时", weight: 10, progress: 0, resources: [
+          { id: "rapid-pol-mock", type: "paper", name: "肖四", detail: "选择题约 40 分钟；大题每题约 25 分钟", completed: false },
+        ] },
       ],
     },
     {
@@ -273,12 +307,22 @@ export const defaultStudyState: StudyState = {
       shortName: "840",
       weight: 30,
       accent: "#755c9f",
-      note: "专业课尚未开始",
+      note: "按 427 分快线：7 月中启动、10 月中一轮、11 月真题、考前模拟二刷",
       phases: [
-        { id: "cir-first", name: "一轮复习", weight: 30, progress: 0, resources: [] },
-        { id: "cir-chapter", name: "章节习题", weight: 20, progress: 0, resources: [] },
-        { id: "cir-real", name: "历年真题", weight: 30, progress: 0, resources: [] },
-        { id: "cir-material", name: "机构资料", weight: 20, progress: 0, resources: [] },
+        { id: "cir-first", name: "初试全程班一轮", weight: 35, progress: 0, resources: [
+          { id: "rapid-cir-course", type: "chapter", name: "水木珞研初试全程班", detail: "逐节网课，7 月中至 10 月中", completed: false },
+          { id: "rapid-cir-book", type: "book", name: "范承志《电路原理》", detail: "参考教材", completed: false },
+        ] },
+        { id: "cir-chapter", name: "宝典例题与课后题", weight: 15, progress: 0, resources: [
+          { id: "rapid-cir-chapter", type: "exercise", name: "宝典例题/课后题", detail: "每节课后立即完成并订正", completed: false },
+        ] },
+        { id: "cir-real", name: "01–22 年真题", weight: 30, progress: 0, resources: [
+          { id: "rapid-cir-real", type: "paper", name: "01–22 年真题", detail: "10 月中至 11 月中，一天一套并认真订正", completed: false },
+        ] },
+        { id: "cir-material", name: "6 套模拟 + 16–21 二刷", weight: 20, progress: 0, resources: [
+          { id: "rapid-cir-mock", type: "paper", name: "水木珞研 6 套模拟卷", detail: "每隔一天一套", completed: false },
+          { id: "rapid-cir-second", type: "paper", name: "16–21 年真题二刷", detail: "模拟后回到近六年真题", completed: false },
+        ] },
       ],
     },
   ],
@@ -286,6 +330,8 @@ export const defaultStudyState: StudyState = {
   plans: [],
   schedule: [],
   planTemplates: [],
+  experiences: defaultExperiences,
+  fastestExperienceId: DEFAULT_FASTEST_EXPERIENCE_ID,
 };
 
 export function subjectProgress(subject: Subject) {

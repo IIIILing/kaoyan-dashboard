@@ -12,6 +12,7 @@ import {
   Home,
   ListTodo,
   Moon,
+  NotebookText,
   Palette,
   Pencil,
   Plus,
@@ -47,6 +48,13 @@ import {
 } from "./study-state";
 import { applyThemePalette, COLOR_FIELDS, THEME_PALETTES } from "./theme-palettes";
 import {
+  benchmarkPhaseProgress,
+  benchmarkProjectProgress,
+  benchmarkSubjectProgress,
+  normalizeExperiences,
+} from "./experience-data";
+import ExperiencesView from "./ExperiencesView";
+import {
   createScheduleArchive,
   mergeImportedPlans,
   mergeImportedSessions,
@@ -57,7 +65,7 @@ import {
   type ScheduleImportCandidate,
 } from "./schedule-data";
 
-type View = "overview" | "today" | "records" | "subjects" | "weekly" | "scoring" | "settings";
+type View = "overview" | "today" | "records" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
 type DashboardAccount = {
@@ -77,6 +85,7 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "today", label: "今日计划", icon: ListTodo },
   { id: "records", label: "时间记录", icon: Clock3 },
   { id: "subjects", label: "科目进度", icon: BookOpen },
+  { id: "experiences", label: "经验贴", icon: NotebookText },
   { id: "weekly", label: "周报", icon: BarChart3 },
   { id: "scoring", label: "评分标准", icon: SlidersHorizontal },
   { id: "settings", label: "设置", icon: Settings },
@@ -145,7 +154,7 @@ function normalizeStudyState(value: unknown): StudyState | null {
   if (!value || typeof value !== "object") return null;
   const parsed = value as StudyState;
   if (
-    (parsed.version !== 1 && parsed.version !== 2)
+    (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)
     || !Array.isArray(parsed.subjects)
     || !Array.isArray(parsed.sessions)
   ) return null;
@@ -153,7 +162,7 @@ function normalizeStudyState(value: unknown): StudyState | null {
   const scheduleImport = parseScheduleImport(parsed);
   const normalized: StudyState = withUnifiedSchedule({
     ...parsed,
-    version: 2,
+    version: 3,
     profile: {
       ...defaultStudyState.profile,
       ...parsed.profile,
@@ -194,64 +203,61 @@ function normalizeStudyState(value: unknown): StudyState | null {
     plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
     schedule: [],
     planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
+    experiences: normalizeExperiences(parsed.experiences),
+    fastestExperienceId: typeof parsed.fastestExperienceId === "string"
+      && normalizeExperiences(parsed.experiences).some((item) => item.id === parsed.fastestExperienceId)
+      ? parsed.fastestExperienceId
+      : defaultStudyState.fastestExperienceId,
   });
 
-  const savedEnglish = normalized.subjects.find((subject) => subject.id === "english");
-  const defaultEnglish = defaultStudyState.subjects.find((subject) => subject.id === "english");
-  const hasLegacyEnglishPlan = savedEnglish?.phases.some((phase) =>
-    ["eng-word", "eng-read", "eng-other", "eng-write"].includes(phase.id),
-  );
-  const savedCircuit = normalized.subjects.find((subject) => subject.id === "circuit");
-  const defaultCircuit = defaultStudyState.subjects.find((subject) => subject.id === "circuit");
-  const hasLegacyCircuitPlan = savedCircuit?.phases.some((phase) =>
-    ["cir-basic", "cir-exercise", "cir-mock"].includes(phase.id),
-  );
-  if (
-    !((savedEnglish && defaultEnglish && hasLegacyEnglishPlan)
-      || (savedCircuit && defaultCircuit && hasLegacyCircuitPlan))
-  ) return normalized;
+  if (parsed.version === 3) return normalized;
 
-  const savedProgress = new Map(
-    savedEnglish?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
-  );
-  const progressSource: Record<string, string> = {
-    "eng-word-first": "eng-word",
-    "eng-real": "eng-read",
-    "eng-writing": "eng-write",
+  const legacyProgressSource: Record<string, string[]> = {
+    "eng-word-first": ["eng-word-first", "eng-word", "eng-word-second"],
+    "eng-real": ["eng-real", "eng-read"],
+    "eng-translation": ["eng-other"],
+    "eng-mock": ["eng-mock"],
+    "eng-writing": ["eng-writing", "eng-write"],
+    "cir-first": ["cir-first", "cir-basic"],
+    "cir-chapter": ["cir-chapter", "cir-exercise"],
+    "cir-real": ["cir-real"],
+    "cir-material": ["cir-material", "cir-mock"],
   };
-  const savedCircuitProgress = new Map(
-    savedCircuit?.phases.map((phase) => [phase.id, phase.progress]) ?? [],
-  );
-  const circuitProgressSource: Record<string, string> = {
-    "cir-first": "cir-basic",
-    "cir-chapter": "cir-exercise",
-    "cir-material": "cir-mock",
-  };
+  const supersededPhaseIds = new Set([
+    "eng-word", "eng-word-second", "eng-read", "eng-other", "eng-write",
+    "cir-basic", "cir-exercise", "cir-mock",
+  ]);
   return {
     ...normalized,
-    subjects: normalized.subjects.map((subject) =>
-      subject.id === "english" && savedEnglish && defaultEnglish && hasLegacyEnglishPlan
-        ? {
-            ...subject,
-            phases: defaultEnglish.phases.map((phase) => ({
-              ...phase,
-              progress: savedProgress.get(phase.id)
-                ?? savedProgress.get(progressSource[phase.id])
-                ?? phase.progress,
-            })),
-          }
-        : subject.id === "circuit" && defaultCircuit && hasLegacyCircuitPlan
-          ? {
-              ...subject,
-              phases: defaultCircuit.phases.map((phase) => ({
-                ...phase,
-                progress: savedCircuitProgress.get(phase.id)
-                  ?? savedCircuitProgress.get(circuitProgressSource[phase.id])
-                  ?? phase.progress,
-              })),
-            }
-          : subject,
-    ),
+    subjects: normalized.subjects.map((subject) => {
+      const rapid = defaultStudyState.subjects.find((item) => item.id === subject.id);
+      if (!rapid) return subject;
+      const progressById = new Map(subject.phases.map((phase) => [phase.id, phase.progress]));
+      const resourcesById = new Map(subject.phases.map((phase) => [phase.id, phase.resources]));
+      const rapidIds = new Set(rapid.phases.map((phase) => phase.id));
+      const migratedPhases = rapid.phases.map((phase) => {
+        const candidates = legacyProgressSource[phase.id] ?? [phase.id];
+        const savedProgress = candidates
+          .map((id) => progressById.get(id))
+          .filter((value): value is number => typeof value === "number");
+        const savedResources = candidates.flatMap((id) => resourcesById.get(id) ?? []);
+        const resources = [...phase.resources];
+        for (const resource of savedResources) {
+          const index = resources.findIndex((item) => item.id === resource.id);
+          if (index >= 0) resources[index] = resource;
+          else resources.push(resource);
+        }
+        return {
+          ...phase,
+          progress: savedProgress.length ? Math.max(...savedProgress) : phase.progress,
+          resources,
+        };
+      });
+      const customPhases = subject.phases.filter((phase) =>
+        !rapidIds.has(phase.id) && !supersededPhaseIds.has(phase.id),
+      );
+      return { ...subject, note: rapid.note, phases: [...migratedPhases, ...customPhases] };
+    }),
   };
 }
 
@@ -1062,6 +1068,7 @@ export default function Dashboard() {
           />
         )}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
+        {view === "experiences" && <ExperiencesView state={state} updateState={updateState} />}
         {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} summary={weekSummary} />}
         {view === "scoring" && (
           <ScoringView
@@ -1315,6 +1322,9 @@ function RecordsView({ state, onRecord, onEdit, onDelete }: {
 function SubjectsView({ state, updateState }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void }) {
   const importRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<{ subjectId: string; phaseId: string } | null>(null);
+  const today = localDate();
+  const fastestExperience = state.experiences.find((item) => item.id === state.fastestExperienceId);
+  const fastestProjectProgress = benchmarkProjectProgress(fastestExperience, state.subjects, today, state.profile.examDate);
 
   function addPhase(subject: Subject) {
     if (!window.confirm(`即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`)) return;
@@ -1354,31 +1364,43 @@ function SubjectsView({ state, updateState }: { state: StudyState; updateState: 
   return (
     <div className="page-stack">
       <section className="progress-hero panel">
-        <div><p className="card-kicker">加权总进度</p><strong>{projectProgress(state.subjects)}%</strong><p className="muted">科目权重可在设置中调整；阶段进度会自动折算。</p></div>
-        <div className="progress-hero-actions"><ProgressRing value={projectProgress(state.subjects)} /><div className="button-row"><button className="secondary-button" onClick={exportSubjects}><Download size={16} />导出科目 JSON</button><button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入科目 JSON</button></div><input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importSubjects(file); event.target.value = ""; }} /></div>
+        <div>
+          <p className="card-kicker">加权总进度 · 动态对比</p>
+          <div className="project-comparison-values"><strong>{projectProgress(state.subjects)}%</strong><span>我的进度</span>{fastestProjectProgress !== null && <><strong className="fast-value">{fastestProjectProgress}%</strong><span>快线今日应达</span></>}</div>
+          <p className="muted">基准：{fastestExperience?.title ?? "未选择"}；按 {today} 与考试年份动态换算。阶段日期若为推断值，可在经验贴页核对来源标记。</p>
+        </div>
+        <div className="progress-hero-actions"><div className="ring-comparison"><ProgressRing value={projectProgress(state.subjects)} /><span>我 / 快线 {fastestProjectProgress ?? "—"}%</span></div><div className="button-row"><button className="secondary-button" onClick={exportSubjects}><Download size={16} />导出科目 JSON</button><button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入科目 JSON</button></div><input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importSubjects(file); event.target.value = ""; }} /></div>
       </section>
       <section className="subject-detail-grid">
-        {state.subjects.map((subject) => (
+        {state.subjects.map((subject) => {
+          const subjectBenchmark = benchmarkSubjectProgress(fastestExperience, subject, today, state.profile.examDate);
+          return (
           <article className="panel subject-detail" key={subject.id}>
-            <div className="panel-heading"><div><p className="card-kicker">占总计划 {subject.weight}%</p><h2>{subject.name}</h2></div><div className="heading-actions"><span className="score-badge" style={{ color: subject.accent }}>{subjectProgress(subject)}%</span><button className="secondary-button" onClick={() => addPhase(subject)}><Plus size={15} />新增阶段</button></div></div>
+            <div className="panel-heading"><div><p className="card-kicker">占总计划 {subject.weight}%</p><h2>{subject.name}</h2></div><div className="heading-actions"><div className="subject-comparison-badges"><span className="score-badge" style={{ color: subject.accent }}>我 {subjectProgress(subject)}%</span>{subjectBenchmark !== null && <span className="benchmark-badge">快线 {subjectBenchmark}%</span>}</div><button className="secondary-button" onClick={() => addPhase(subject)}><Plus size={15} />新增阶段</button></div></div>
             <p className="subject-note">{subject.note}</p>
             <div className="phase-list">
-              {subject.phases.map((phase) => (
-                <div className="phase-row" key={phase.id}>
+              {subject.phases.map((phase) => {
+                const benchmark = benchmarkPhaseProgress(fastestExperience, subject.id, phase.id, today, state.profile.examDate);
+                return (
+                <div className="phase-row comparison-row" key={phase.id}>
                   <button className="phase-open" onClick={() => setEditing({ subjectId: subject.id, phaseId: phase.id })}><span>{phase.name}</span><small>阶段权重 {phase.weight}% · {phase.resources.length} 项资料</small></button>
-                  <input type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
-                    const value = Number(event.target.value);
-                    updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? { ...p, progress: value } : p) } : item) }));
-                  }} style={{
-                    "--range-color": subject.accent,
-                    "--range-progress": `${Math.min(100, Math.max(0, phase.progress))}%`,
-                  } as React.CSSProperties} />
-                  <strong>{phase.progress}%</strong>
+                  <div className="comparison-slider">
+                    <input aria-label={`${subject.name}${phase.name}我的进度`} type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
+                      const value = Number(event.target.value);
+                      updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? { ...p, progress: value } : p) } : item) }));
+                    }} style={{
+                      "--range-color": subject.accent,
+                      "--range-progress": `${Math.min(100, Math.max(0, phase.progress))}%`,
+                    } as React.CSSProperties} />
+                    {benchmark !== null && <span className="benchmark-marker" style={{ left: `${benchmark}%` }} title={`快线今日应达 ${benchmark}%`} />}
+                    <div className="comparison-legend"><span style={{ color: subject.accent }}>我的 {phase.progress}%</span><span>快线 {benchmark ?? "—"}%</span></div>
+                  </div>
+                  <strong className={benchmark !== null && phase.progress < benchmark ? "behind" : "ahead"}>{benchmark === null ? "—" : `${phase.progress - benchmark >= 0 ? "+" : ""}${phase.progress - benchmark}`}</strong>
                 </div>
-              ))}
+              )})}
             </div>
           </article>
-        ))}
+        )})}
       </section>
       {editing && <PhaseEditorDialog state={state} subjectId={editing.subjectId} phaseId={editing.phaseId} updateState={updateState} onClose={() => setEditing(null)} />}
     </div>
