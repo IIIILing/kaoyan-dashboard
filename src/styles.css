@@ -829,6 +829,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .focus-stage-status > span { display: flex; align-items: center; gap: 8px; color: var(--focus-ui-muted); font-size: 10px; font-weight: 700; }
 .focus-stage-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .focus-stage-status i.status-running { background: #60ce8a; box-shadow: 0 0 0 5px rgba(96,206,138,.15); }
+.focus-stage-status i.status-resting { background: #5ba8d8; box-shadow: 0 0 0 5px rgba(91,168,216,.15); }
 .focus-stage-status i.status-paused { background: #e9b85b; }
 .focus-settings-buttons { display: flex; align-items: center; gap: 7px; }
 .focus-settings-buttons button { min-height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 13px; border-radius: 12px; font-size: 10px; font-weight: 650; letter-spacing: -.01em; }
@@ -873,6 +874,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .focus-effect-minimal .focus-main-controls .focus-start,
 .focus-effect-flip .focus-main-controls .focus-start { border-color: #0071e3; background: #0071e3; }
 .focus-effect-glass .focus-main-controls .focus-start { border-color: #b85f43; background: #c06b4f; }
+.focus-main-controls .focus-rest.active { color: #fff; border-color: #4d94bd; background: #4d94bd; }
 .focus-main-controls .focus-finish { color: #d15f5f; }
 .focus-stage-footer > p { justify-self: end; max-width: 300px; margin: 0; color: var(--focus-ui-muted); font-size: 9px; line-height: 1.5; text-align: right; }
 .timer-settings-backdrop { z-index: 75; }
@@ -947,7 +949,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .flip-clock-card span { font-size: 21vw; }
   .flip-clock-group > b { font-size: 10vw; }
   .glass-clock-face time { font-size: 16vw; }
-  .focus-main-controls { width: 100%; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+  .focus-main-controls { width: 100%; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; }
   .focus-main-controls button { min-width: 0; width: 100%; height: 44px; padding: 0; }
   .focus-main-controls button span { display: none; }
   .focus-session-meta { flex-wrap: wrap; justify-content: center; }

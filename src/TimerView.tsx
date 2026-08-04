@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { StudySession, StudyState } from "./study-state";
 
 type TimerMode = "stopwatch" | "countdown" | "pomodoro";
-type TimerStatus = "idle" | "running" | "paused" | "finished";
+type TimerStatus = "idle" | "running" | "resting" | "paused" | "finished";
 type BuiltInEffectId = "minimal" | "flip" | "glass";
 type EffectBase = BuiltInEffectId;
 type SettingsDialog = "mode" | "duration" | "effects" | "background" | null;
@@ -101,7 +101,7 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as Partial<StoredTimer> & { clockStyle?: string } | null;
     if (!parsed || !MODE_OPTIONS.some((item) => item.id === parsed.mode)) return null;
-    if (!(["idle", "running", "paused", "finished"] as TimerStatus[]).includes(parsed.status as TimerStatus)) return null;
+    if (!(["idle", "running", "resting", "paused", "finished"] as TimerStatus[]).includes(parsed.status as TimerStatus)) return null;
     const customEffects = Array.isArray(parsed.customEffects)
       ? parsed.customEffects.filter((effect): effect is CustomEffect => Boolean(effect?.id && effect.name && BUILT_IN_EFFECTS.some((item) => item.id === effect.base) && isBackground(effect.background)))
       : [];
@@ -127,7 +127,7 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
       restMs: Math.max(0, Number(parsed.restMs) || 0),
       startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : null,
       endedAt: typeof parsed.endedAt === "number" ? parsed.endedAt : null,
-      transitionAt: typeof parsed.transitionAt === "number" ? parsed.transitionAt : null,
+      transitionAt: parsed.status !== "paused" && typeof parsed.transitionAt === "number" ? parsed.transitionAt : null,
     };
   } catch {
     return null;
@@ -239,7 +239,7 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
-    if (status === "idle" || status === "finished") return;
+    if (status === "idle" || status === "paused" || status === "finished") return;
     const interval = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(interval);
   }, [status]);
@@ -253,10 +253,10 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   }, [storageKey, mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes, flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt]);
 
   const effectiveActiveMs = activeMs + (status === "running" && transitionAt ? Math.max(0, now - transitionAt) : 0);
-  const effectiveRestMs = restMs + (status === "paused" && transitionAt ? Math.max(0, now - transitionAt) : 0);
+  const effectiveRestMs = restMs + (status === "resting" && transitionAt ? Math.max(0, now - transitionAt) : 0);
   const targetMs = mode === "countdown" ? countdownMinutes * 60_000 : mode === "pomodoro" ? pomodoroFocusMinutes * 60_000 : null;
   const remainingMs = targetMs === null ? null : Math.max(0, targetMs - effectiveActiveMs);
-  const displayText = clockText(effectiveActiveMs);
+  const displayText = clockText(status === "resting" ? effectiveRestMs : effectiveActiveMs);
   const displayParts = displayText.split(":");
   const showSeconds = showSecondsByEffect[effectId] ?? false;
   const visibleDisplayParts = showSeconds ? displayParts : displayParts.slice(0, 2);
@@ -278,27 +278,36 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   }, [status, targetMs, effectiveActiveMs]);
 
   const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date(now));
-  const statusLabel = status === "running" ? "正在专注" : status === "paused" ? "已暂停 · 计入休息" : status === "finished" ? "本轮已结束" : "准备开始";
+  const statusLabel = status === "running" ? "正在专注" : status === "resting" ? "正在休息 · 单独计时" : status === "paused" ? "已暂停 · 计时冻结" : status === "finished" ? "本轮已结束" : "准备开始";
 
   function startTimer() {
     if (status === "running" || status === "finished") return;
     const timestamp = Date.now(); setFeedback(""); setNow(timestamp);
     if (status === "idle") { setActiveMs(0); setRestMs(0); setStartedAt(timestamp); setEndedAt(null); }
-    else if (status === "paused" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
+    else if (status === "resting" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
     setTransitionAt(timestamp); setStatus("running");
   }
 
-  function pauseTimer() {
-    if (status !== "running" || !transitionAt) return;
-    const timestamp = Date.now(); setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
-    setTransitionAt(timestamp); setNow(timestamp); setStatus("paused");
+  function startRest() {
+    if ((status !== "running" && status !== "paused") || !startedAt) return;
+    const timestamp = Date.now(); setFeedback(""); setNow(timestamp);
+    if (status === "running" && transitionAt) setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
+    setTransitionAt(timestamp); setStatus("resting");
   }
 
-  function finishTimer() {
-    if ((status !== "running" && status !== "paused") || !transitionAt || effectiveActiveMs < 1000) return;
+  function pauseTimer() {
+    if ((status !== "running" && status !== "resting") || !transitionAt) return;
     const timestamp = Date.now();
     if (status === "running") setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
     else setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
+    setTransitionAt(null); setNow(timestamp); setStatus("paused");
+  }
+
+  function finishTimer() {
+    if ((status !== "running" && status !== "resting" && status !== "paused") || effectiveActiveMs < 1000) return;
+    const timestamp = Date.now();
+    if (status === "running" && transitionAt) setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
+    else if (status === "resting" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
     setTransitionAt(null); setEndedAt(timestamp); setNow(timestamp); setStatus("finished"); setCompletionOpen(true);
   }
 
@@ -350,12 +359,13 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
         <footer className="focus-stage-footer">
           <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
           <div className="focus-main-controls">
-            <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "paused" ? "继续" : "开始"}</span></button>
-            <button type="button" onClick={pauseTimer} disabled={status !== "running"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
-            <button type="button" className="focus-finish" onClick={finishTimer} disabled={(status !== "running" && status !== "paused") || effectiveActiveMs < 1000}><Square size={17} fill="currentColor" /><span>结束</span></button>
+            <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "resting" ? "继续学习" : status === "paused" ? "继续" : "开始"}</span></button>
+            <button type="button" onClick={pauseTimer} disabled={status !== "running" && status !== "resting"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
+            <button type="button" className={`focus-rest ${status === "resting" ? "active" : ""}`} onClick={startRest} disabled={status === "idle" || status === "resting" || status === "finished"}><Coffee size={18} /><span>休息</span></button>
+            <button type="button" className="focus-finish" onClick={finishTimer} disabled={(status !== "running" && status !== "resting" && status !== "paused") || effectiveActiveMs < 1000}><Square size={17} fill="currentColor" /><span>结束</span></button>
             <button type="button" onClick={() => (status === "idle" || window.confirm("确定放弃当前计时？本次时间不会保存。")) && resetTimer("本次计时已清空")} disabled={status === "idle"}><RotateCcw size={18} /><span>清空</span></button>
           </div>
-          <p>{feedback || "所有配置已收进右上角按钮，专注时只看这一块钟表。"}</p>
+          <p>{feedback || "休息会单独计时；暂停会冻结计时并保留学习时长示数。"}</p>
         </footer>
       </section>
 
