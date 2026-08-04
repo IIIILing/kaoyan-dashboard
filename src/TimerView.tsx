@@ -310,8 +310,9 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   function saveCompletion(form: CompletionForm) {
     if (!startedAt || !form.task.trim()) return;
     onSaveSessions(createTimerSessions({ form, mode, effectLabel: effectName(effectId, customEffects), activeMs, restMs, startedAt }));
+    const activity = state.lifeActivities.find((item) => item.id === form.subjectId && item.active !== false);
     const restMessage = restMs > 0 ? `，暂停 ${shortDuration(restMs)} 已归入休息` : "";
-    resetTimer(`已保存 ${shortDuration(activeMs)} 的学习记录${restMessage}`);
+    resetTimer(`已保存 ${shortDuration(activeMs)} 的${activity?.name ?? "学习"}记录${restMessage}`);
   }
 
   function updateActiveBackground(background: BackgroundSettings) {
@@ -401,7 +402,57 @@ function BackgroundDialog({ effectLabel, value, onSave, onClose }: { effectLabel
 }
 
 function TimerCompletionDialog({ state, activeMs, restMs, startedAt, endedAt, onCancel, onSave }: { state: StudyState; activeMs: number; restMs: number; startedAt: number; endedAt: number; onCancel: () => void; onSave: (form: CompletionForm) => void }) {
-  const [form, setForm] = useState<CompletionForm>({ subjectId: state.subjects[0]?.id ?? "math", task: "", completion: 100, focus: 5, note: "" });
+  const firstActivity = state.lifeActivities.find((activity) => activity.active !== false);
+  const [form, setForm] = useState<CompletionForm>({ subjectId: state.subjects[0]?.id ?? firstActivity?.id ?? "math", task: "", completion: 100, focus: 5, note: "" });
+  const selectedActivity = state.lifeActivities.find((activity) => activity.id === form.subjectId && activity.active !== false);
+  const isLifeActivity = Boolean(selectedActivity);
+
+  function changeCategory(subjectId: string) {
+    const previousActivity = state.lifeActivities.find((activity) => activity.id === form.subjectId && activity.active !== false);
+    const nextActivity = state.lifeActivities.find((activity) => activity.id === subjectId && activity.active !== false);
+    const canAutofill = !form.task.trim() || form.task === previousActivity?.name;
+    setForm({ ...form, subjectId, task: nextActivity && canAutofill ? nextActivity.name : form.task });
+  }
+
   function submit(event: React.FormEvent) { event.preventDefault(); if (form.task.trim()) onSave(form); }
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}><form className="record-dialog timer-completion-dialog" onSubmit={submit}><div className="dialog-heading"><div><p className="card-kicker">本轮已停止</p><h2>保存这段学习记录</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div><div className="timer-session-summary"><div><span>有效学习</span><strong>{shortDuration(activeMs)}</strong></div><div><span>暂停 / 休息</span><strong>{shortDuration(restMs)}</strong></div><div><span>实际时段</span><strong>{timeValue(new Date(startedAt))}–{timeValue(new Date(endedAt))}</strong></div></div><div className="dialog-grid"><label><span>学习科目</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}>{state.subjects.map((subject) => <option value={subject.id} key={subject.id}>{subject.name}</option>)}</select></label><label><span>学习内容</span><input autoFocus placeholder="例如：高数强化第 5 讲与对应习题" value={form.task} onChange={(event) => setForm({ ...form, task: event.target.value })} /></label><label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(event) => setForm({ ...form, completion: Number(event.target.value) })} /></label><label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(event) => setForm({ ...form, focus: Number(event.target.value) })} /></label><label className="wide"><span>复盘备注（可选）</span><textarea placeholder="本轮完成情况、卡点或下一步" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label></div><div className="timer-rest-notice"><Coffee size={17} /><span>{restMs > 0 ? `暂停累计 ${shortDuration(restMs)}，确认后将同时生成一条“休息”记录。` : "本轮没有暂停，只生成学习记录。"}</span></div><div className="dialog-footer"><span>确认前计时保持停止，不会自动开始下一轮。</span><div><button type="button" className="secondary-button" onClick={onCancel}>取消记录</button><button type="submit" className="primary-button" disabled={!form.task.trim()}><Check size={17} />确定并保存</button></div></div></form></div>;
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+      <form className="record-dialog timer-completion-dialog" onSubmit={submit}>
+        <div className="dialog-heading">
+          <div><p className="card-kicker">本轮已停止</p><h2>保存这段{isLifeActivity ? "活动" : "学习"}记录</h2></div>
+          <button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button>
+        </div>
+        <div className="timer-session-summary">
+          <div><span>有效计时</span><strong>{shortDuration(activeMs)}</strong></div>
+          <div><span>暂停 / 休息</span><strong>{shortDuration(restMs)}</strong></div>
+          <div><span>实际时段</span><strong>{timeValue(new Date(startedAt))}–{timeValue(new Date(endedAt))}</strong></div>
+        </div>
+        <div className="dialog-grid">
+          <label>
+            <span>科目 / 活动</span>
+            <select value={form.subjectId} onChange={(event) => changeCategory(event.target.value)}>
+              <optgroup label="学习科目">
+                {state.subjects.map((subject) => <option value={subject.id} key={subject.id}>{subject.name}</option>)}
+              </optgroup>
+              <optgroup label="生活活动">
+                {state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option value={activity.id} key={activity.id}>{activity.name}</option>)}
+              </optgroup>
+            </select>
+          </label>
+          <label>
+            <span>{isLifeActivity ? "活动内容" : "学习内容"}</span>
+            <input autoFocus placeholder={isLifeActivity ? `例如：${selectedActivity?.name}` : "例如：高数强化第 5 讲与对应习题"} value={form.task} onChange={(event) => setForm({ ...form, task: event.target.value })} />
+          </label>
+          {!isLifeActivity && <label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(event) => setForm({ ...form, completion: Number(event.target.value) })} /></label>}
+          {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(event) => setForm({ ...form, focus: Number(event.target.value) })} /></label>}
+          <label className="wide">
+            <span>{isLifeActivity ? "备注（可选）" : "复盘备注（可选）"}</span>
+            <textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "本轮完成情况、卡点或下一步"} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
+          </label>
+        </div>
+        <div className="timer-rest-notice"><Coffee size={17} /><span>{restMs > 0 ? `暂停累计 ${shortDuration(restMs)}，确认后将同时生成一条“休息”记录。` : `本轮没有暂停，只生成${selectedActivity?.name ?? "学习"}记录。`}</span></div>
+        <div className="dialog-footer"><span>确认前计时保持停止，不会自动开始下一轮。</span><div><button type="button" className="secondary-button" onClick={onCancel}>取消记录</button><button type="submit" className="primary-button" disabled={!form.task.trim()}><Check size={17} />确定并保存</button></div></div>
+      </form>
+    </div>
+  );
 }
