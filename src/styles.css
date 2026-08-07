@@ -647,6 +647,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .timer-control-buttons .timer-reset { color: var(--muted); }
 .timer-controls > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; text-align: right; }
 .timer-completion-dialog { width: min(720px, 100%); }
+.timer-start-dialog { width: min(680px, 100%); }
+.timer-dialog-intro { margin: -7px 0 20px; color: var(--muted); font-size: 11px; line-height: 1.75; }
 .timer-session-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-bottom: 18px; }
 .timer-session-summary > div { padding: 13px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
 .timer-session-summary span, .timer-session-summary strong { display: block; }
@@ -654,6 +656,47 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .timer-session-summary strong { font-size: 13px; font-variant-numeric: tabular-nums; }
 .timer-rest-notice { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 11px 13px; border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--success) 10%, var(--surface)); font-size: 10px; line-height: 1.6; }
 .timer-rest-notice svg { flex: 0 0 auto; color: var(--success); }
+.timer-validation-message { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--line)); border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); font-size: 10px; line-height: 1.55; }
+.timer-validation-message svg { flex: 0 0 auto; color: var(--warn); }
+.timer-validation-message.error { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.timer-validation-message.error svg { color: var(--danger); }
+.timer-confirm-dialog { width: min(760px, 100%); }
+.timer-preset-review { display: grid; grid-template-columns: 10px minmax(0, 1fr); align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
+.timer-preset-review .subject-indicator { width: 8px; height: 52px; border-radius: 99px; background: var(--accent); }
+.timer-preset-review small, .timer-preset-review strong, .timer-preset-review div > span { display: block; }
+.timer-preset-review small { margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+.timer-preset-review strong { font-size: 16px; }
+.timer-preset-review div > span { margin-top: 6px; color: var(--muted); font-size: 10px; }
+.timer-segment-dialog { width: min(980px, 100%); }
+.timer-segment-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 4px 0 12px; }
+.timer-segment-toolbar strong, .timer-segment-toolbar span { display: block; }
+.timer-segment-toolbar strong { font-size: 13px; }
+.timer-segment-toolbar span { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.timer-segment-list { display: grid; gap: 12px; }
+.timer-segment-card { padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); transition: border-color .16s ease, box-shadow .16s ease; }
+.timer-segment-card.invalid { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 8%, transparent); }
+.timer-segment-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.timer-segment-card > header > div { display: flex; align-items: center; gap: 9px; }
+.timer-segment-card > header > div:first-child > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft); font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.timer-segment-card > header strong, .timer-segment-card > header small { display: block; }
+.timer-segment-card > header strong { font-size: 11px; }
+.timer-segment-card > header small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.timer-segment-card > header button { height: 31px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 9px; }
+.timer-segment-card > header button:hover { color: var(--accent); border-color: var(--accent); }
+.timer-segment-card > header button:last-child { width: 31px; padding: 0; justify-content: center; }
+.timer-segment-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.timer-segment-fields label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.timer-segment-fields .wide { grid-column: 1 / -1; }
+.timer-segment-fields input[type="range"] { padding: 0; border: 0; box-shadow: none; accent-color: var(--accent); }
+.timer-segment-fields textarea { min-height: 62px; }
+.timer-gap-panel { margin-top: 14px; padding: 13px 14px; border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.timer-gap-panel > div { display: flex; align-items: flex-start; gap: 10px; }
+.timer-gap-panel > div > svg { flex: 0 0 auto; margin-top: 1px; color: var(--warn); }
+.timer-gap-panel strong, .timer-gap-panel div span { display: block; }
+.timer-gap-panel strong { margin-bottom: 4px; font-size: 10px; }
+.timer-gap-panel div span { color: var(--muted); font-size: 9px; line-height: 1.55; }
+.timer-gap-panel > label { display: flex; align-items: center; gap: 8px; margin-top: 11px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--warn) 20%, var(--line)); color: var(--text); font-size: 9px; cursor: pointer; }
+.timer-gap-panel > label input { width: 15px; height: 15px; padding: 0; accent-color: var(--warn); }
 
 @media (max-width: 1160px) {
   .main-area { padding-inline: 24px; }
@@ -829,6 +872,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .focus-stage-status > span { display: flex; align-items: center; gap: 8px; color: var(--focus-ui-muted); font-size: 10px; font-weight: 700; }
 .focus-stage-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .focus-stage-status i.status-running { background: #60ce8a; box-shadow: 0 0 0 5px rgba(96,206,138,.15); }
+.focus-stage-status i.status-resting { background: #5ba8d8; box-shadow: 0 0 0 5px rgba(91,168,216,.15); }
 .focus-stage-status i.status-paused { background: #e9b85b; }
 .focus-settings-buttons { display: flex; align-items: center; gap: 7px; }
 .focus-settings-buttons button { min-height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 13px; border-radius: 12px; font-size: 10px; font-weight: 650; letter-spacing: -.01em; }
@@ -866,6 +910,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 :root[data-theme="dark"] .glass-clock-face strong { color: #e2a087; border-color: rgba(226,160,135,.22); background: rgba(217,133,104,.12); }
 .focus-stage-footer { z-index: 3; display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 18px; }
 .focus-session-meta { display: flex; gap: 16px; align-items: center; color: var(--focus-ui-muted); font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.focus-session-meta .focus-current-task { max-width: 260px; overflow: hidden; padding: 5px 9px; border: 1px solid var(--focus-ui-line); border-radius: 999px; text-overflow: ellipsis; white-space: nowrap; }
 .focus-main-controls { display: flex; align-items: center; gap: 8px; }
 .focus-main-controls button { min-width: 94px; height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 13px; font-size: 11px; font-weight: 650; }
 .focus-main-controls button:disabled { cursor: default; opacity: .34; }
@@ -873,6 +918,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .focus-effect-minimal .focus-main-controls .focus-start,
 .focus-effect-flip .focus-main-controls .focus-start { border-color: #0071e3; background: #0071e3; }
 .focus-effect-glass .focus-main-controls .focus-start { border-color: #b85f43; background: #c06b4f; }
+.focus-main-controls .focus-rest.active { color: #fff; border-color: #4d94bd; background: #4d94bd; }
 .focus-main-controls .focus-finish { color: #d15f5f; }
 .focus-stage-footer > p { justify-self: end; max-width: 300px; margin: 0; color: var(--focus-ui-muted); font-size: 9px; line-height: 1.5; text-align: right; }
 .timer-settings-backdrop { z-index: 75; }
@@ -947,7 +993,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .flip-clock-card span { font-size: 21vw; }
   .flip-clock-group > b { font-size: 10vw; }
   .glass-clock-face time { font-size: 16vw; }
-  .focus-main-controls { width: 100%; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+  .focus-main-controls { width: 100%; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; }
   .focus-main-controls button { min-width: 0; width: 100%; height: 44px; padding: 0; }
   .focus-main-controls button span { display: none; }
   .focus-session-meta { flex-wrap: wrap; justify-content: center; }
@@ -958,6 +1004,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .effect-mini-preview { grid-row: 1 / span 2; }
   .custom-effect-form, .focus-duration-grid, .background-color-grid { grid-template-columns: 1fr; }
   .background-mode-list { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .timer-start-dialog .dialog-footer,
+  .timer-segment-dialog .dialog-footer,
+  .timer-confirm-dialog .dialog-footer,
+  .timer-segment-toolbar { align-items: stretch; flex-direction: column; }
+  .timer-start-dialog .dialog-footer > div,
+  .timer-segment-dialog .dialog-footer > div,
+  .timer-confirm-dialog .dialog-footer > div { display: grid; grid-template-columns: 1fr; }
+  .timer-segment-fields { grid-template-columns: 1fr; }
+  .timer-segment-fields .wide { grid-column: auto; }
+  .timer-segment-card > header { align-items: flex-start; }
+  .timer-segment-card > header button { width: 31px; padding: 0; justify-content: center; font-size: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Check,
   Clock3,
   Coffee,
@@ -9,6 +10,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Scissors,
   Settings2,
   SlidersHorizontal,
   Square,
@@ -20,7 +22,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { StudySession, StudyState } from "./study-state";
 
 type TimerMode = "stopwatch" | "countdown" | "pomodoro";
-type TimerStatus = "idle" | "running" | "paused" | "finished";
+type TimerStatus = "idle" | "running" | "resting" | "paused" | "finished";
 type BuiltInEffectId = "minimal" | "flip" | "glass";
 type EffectBase = BuiltInEffectId;
 type SettingsDialog = "mode" | "duration" | "effects" | "background" | null;
@@ -59,11 +61,18 @@ type StoredTimer = {
   startedAt: number | null;
   endedAt: number | null;
   transitionAt: number | null;
+  preset: TimerPreset | null;
 };
 
-type CompletionForm = {
+type TimerPreset = {
   subjectId: string;
   task: string;
+};
+
+type TimerSegment = TimerPreset & {
+  id: string;
+  start: string;
+  end: string;
   completion: number;
   focus: number;
   note: string;
@@ -101,7 +110,7 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as Partial<StoredTimer> & { clockStyle?: string } | null;
     if (!parsed || !MODE_OPTIONS.some((item) => item.id === parsed.mode)) return null;
-    if (!(["idle", "running", "paused", "finished"] as TimerStatus[]).includes(parsed.status as TimerStatus)) return null;
+    if (!(["idle", "running", "resting", "paused", "finished"] as TimerStatus[]).includes(parsed.status as TimerStatus)) return null;
     const customEffects = Array.isArray(parsed.customEffects)
       ? parsed.customEffects.filter((effect): effect is CustomEffect => Boolean(effect?.id && effect.name && BUILT_IN_EFFECTS.some((item) => item.id === effect.base) && isBackground(effect.background)))
       : [];
@@ -127,7 +136,10 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
       restMs: Math.max(0, Number(parsed.restMs) || 0),
       startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : null,
       endedAt: typeof parsed.endedAt === "number" ? parsed.endedAt : null,
-      transitionAt: typeof parsed.transitionAt === "number" ? parsed.transitionAt : null,
+      transitionAt: parsed.status !== "paused" && typeof parsed.transitionAt === "number" ? parsed.transitionAt : null,
+      preset: parsed.preset && typeof parsed.preset.subjectId === "string" && typeof parsed.preset.task === "string"
+        ? { subjectId: parsed.preset.subjectId, task: parsed.preset.task }
+        : null,
     };
   } catch {
     return null;
@@ -163,6 +175,37 @@ function timeValue(date: Date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function dateTimeValue(timestamp: number) {
+  const date = new Date(timestamp);
+  return `${localDateValue(date)}T${timeValue(date)}`;
+}
+
+function minuteFloor(timestamp: number) {
+  return Math.floor(timestamp / 60_000) * 60_000;
+}
+
+function minuteCeil(timestamp: number) {
+  return Math.ceil(timestamp / 60_000) * 60_000;
+}
+
+function timerBounds(startedAt: number, endedAt: number) {
+  const start = minuteFloor(startedAt);
+  return { start, end: Math.max(start + 60_000, minuteCeil(endedAt)) };
+}
+
+function timestampValue(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+function dateTimeRangeLabel(start: number, end: number) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  return localDateValue(startDate) === localDateValue(endDate)
+    ? `${timeValue(startDate)}–${timeValue(endDate)}`
+    : `${localDateValue(startDate)} ${timeValue(startDate)}–${localDateValue(endDate)} ${timeValue(endDate)}`;
+}
+
 function modeName(mode: TimerMode) {
   return MODE_OPTIONS.find((item) => item.id === mode)?.label ?? "计时器";
 }
@@ -180,32 +223,44 @@ function backgroundStyle(background: BackgroundSettings): CSSProperties {
   return {};
 }
 
-function createTimerSessions({ form, mode, effectLabel, activeMs, restMs, startedAt }: {
-  form: CompletionForm;
+function createTimerSessions({ segments, mode, effectLabel, activeMs, restMs }: {
+  segments: TimerSegment[];
   mode: TimerMode;
   effectLabel: string;
   activeMs: number;
   restMs: number;
-  startedAt: number;
 }): StudySession[] {
-  const activeMinutes = Math.max(1, Math.ceil(activeMs / 60_000));
-  const restMinutes = restMs > 0 ? Math.max(1, Math.ceil(restMs / 60_000)) : 0;
-  const studyStart = new Date(startedAt);
-  const studyEnd = new Date(studyStart.getTime() + activeMinutes * 60_000);
   const timerSummary = `${modeName(mode)} · ${effectLabel} · 有效 ${shortDuration(activeMs)} · 暂停休息 ${shortDuration(restMs)}`;
-  const study: StudySession = {
-    id: crypto.randomUUID(), date: localDateValue(studyStart), start: timeValue(studyStart), end: timeValue(studyEnd),
-    subjectId: form.subjectId, task: form.task.trim(), plannedMinutes: activeMinutes, actualMinutes: activeMinutes,
-    completion: form.completion, focus: form.focus, note: [form.note.trim(), timerSummary].filter(Boolean).join(" · "),
-  };
-  if (!restMinutes) return [study];
-  const restStart = studyEnd;
-  const restEnd = new Date(restStart.getTime() + restMinutes * 60_000);
-  return [study, {
-    id: crypto.randomUUID(), date: localDateValue(restStart), start: timeValue(restStart), end: timeValue(restEnd),
-    subjectId: "rest", task: "计时暂停", plannedMinutes: restMinutes, actualMinutes: restMinutes,
-    completion: 100, focus: 5, note: `计时器自动归入休息 · 累计 ${shortDuration(restMs)}`,
-  }];
+  return [...segments]
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .flatMap((segment) => {
+      const segmentStart = timestampValue(segment.start);
+      const segmentEnd = timestampValue(segment.end);
+      const sessions: StudySession[] = [];
+      let cursor = segmentStart;
+      while (cursor < segmentEnd) {
+        const cursorDate = new Date(cursor);
+        const nextMidnight = new Date(cursorDate);
+        nextMidnight.setHours(24, 0, 0, 0);
+        const pieceEnd = Math.min(segmentEnd, nextMidnight.getTime());
+        const minutes = Math.max(1, Math.round((pieceEnd - cursor) / 60_000));
+        sessions.push({
+          id: crypto.randomUUID(),
+          date: localDateValue(cursorDate),
+          start: timeValue(cursorDate),
+          end: timeValue(new Date(pieceEnd)),
+          subjectId: segment.subjectId,
+          task: segment.task.trim(),
+          plannedMinutes: minutes,
+          actualMinutes: minutes,
+          completion: segment.completion,
+          focus: segment.focus,
+          note: [segment.note.trim(), timerSummary].filter(Boolean).join(" · "),
+        });
+        cursor = pieceEnd;
+      }
+      return sessions;
+    });
 }
 
 export default function TimerView({ state, accountId, onSaveSessions, onExit }: {
@@ -233,13 +288,15 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   const [startedAt, setStartedAt] = useState<number | null>(initial?.startedAt ?? null);
   const [endedAt, setEndedAt] = useState<number | null>(initial?.endedAt ?? null);
   const [transitionAt, setTransitionAt] = useState<number | null>(initial?.transitionAt ?? null);
+  const [preset, setPreset] = useState<TimerPreset | null>(initial?.preset ?? null);
   const [now, setNow] = useState(Date.now());
   const [completionOpen, setCompletionOpen] = useState(initial?.status === "finished");
+  const [startSetupOpen, setStartSetupOpen] = useState(false);
   const [settingsDialog, setSettingsDialog] = useState<SettingsDialog>(null);
   const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
-    if (status === "idle" || status === "finished") return;
+    if (status === "idle" || status === "paused" || status === "finished") return;
     const interval = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(interval);
   }, [status]);
@@ -247,16 +304,16 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   useEffect(() => {
     const snapshot: StoredTimer = {
       mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes,
-      flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt,
+      flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt, preset,
     };
     window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
-  }, [storageKey, mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes, flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt]);
+  }, [storageKey, mode, status, effectId, countdownMinutes, pomodoroFocusMinutes, pomodoroBreakMinutes, flipLineWidth, customEffects, builtInBackgrounds, showSecondsByEffect, activeMs, restMs, startedAt, endedAt, transitionAt, preset]);
 
   const effectiveActiveMs = activeMs + (status === "running" && transitionAt ? Math.max(0, now - transitionAt) : 0);
-  const effectiveRestMs = restMs + (status === "paused" && transitionAt ? Math.max(0, now - transitionAt) : 0);
+  const effectiveRestMs = restMs + (status === "resting" && transitionAt ? Math.max(0, now - transitionAt) : 0);
   const targetMs = mode === "countdown" ? countdownMinutes * 60_000 : mode === "pomodoro" ? pomodoroFocusMinutes * 60_000 : null;
   const remainingMs = targetMs === null ? null : Math.max(0, targetMs - effectiveActiveMs);
-  const displayText = clockText(effectiveActiveMs);
+  const displayText = clockText(status === "resting" ? effectiveRestMs : effectiveActiveMs);
   const displayParts = displayText.split(":");
   const showSeconds = showSecondsByEffect[effectId] ?? false;
   const visibleDisplayParts = showSeconds ? displayParts : displayParts.slice(0, 2);
@@ -278,41 +335,57 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   }, [status, targetMs, effectiveActiveMs]);
 
   const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date(now));
-  const statusLabel = status === "running" ? "正在专注" : status === "paused" ? "已暂停 · 计入休息" : status === "finished" ? "本轮已结束" : "准备开始";
+  const statusLabel = status === "running" ? "正在专注" : status === "resting" ? "正在休息 · 单独计时" : status === "paused" ? "已暂停 · 计时冻结" : status === "finished" ? "本轮已结束" : "准备开始";
+
+  function beginTimer(nextPreset: TimerPreset | null) {
+    if (status !== "idle") return;
+    const timestamp = Date.now();
+    setPreset(nextPreset && nextPreset.subjectId && nextPreset.task.trim() ? { ...nextPreset, task: nextPreset.task.trim() } : null);
+    setStartSetupOpen(false); setFeedback(""); setNow(timestamp); setActiveMs(0); setRestMs(0);
+    setStartedAt(timestamp); setEndedAt(null); setTransitionAt(timestamp); setStatus("running");
+  }
 
   function startTimer() {
     if (status === "running" || status === "finished") return;
     const timestamp = Date.now(); setFeedback(""); setNow(timestamp);
-    if (status === "idle") { setActiveMs(0); setRestMs(0); setStartedAt(timestamp); setEndedAt(null); }
-    else if (status === "paused" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
+    if (status === "idle") { setStartSetupOpen(true); return; }
+    if (status === "resting" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
     setTransitionAt(timestamp); setStatus("running");
   }
 
-  function pauseTimer() {
-    if (status !== "running" || !transitionAt) return;
-    const timestamp = Date.now(); setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
-    setTransitionAt(timestamp); setNow(timestamp); setStatus("paused");
+  function startRest() {
+    if ((status !== "running" && status !== "paused") || !startedAt) return;
+    const timestamp = Date.now(); setFeedback(""); setNow(timestamp);
+    if (status === "running" && transitionAt) setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
+    setTransitionAt(timestamp); setStatus("resting");
   }
 
-  function finishTimer() {
-    if ((status !== "running" && status !== "paused") || !transitionAt || effectiveActiveMs < 1000) return;
+  function pauseTimer() {
+    if ((status !== "running" && status !== "resting") || !transitionAt) return;
     const timestamp = Date.now();
     if (status === "running") setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
     else setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
+    setTransitionAt(null); setNow(timestamp); setStatus("paused");
+  }
+
+  function finishTimer() {
+    if ((status !== "running" && status !== "resting" && status !== "paused") || effectiveActiveMs < 1000) return;
+    const timestamp = Date.now();
+    if (status === "running" && transitionAt) setActiveMs((value) => value + Math.max(0, timestamp - transitionAt));
+    else if (status === "resting" && transitionAt) setRestMs((value) => value + Math.max(0, timestamp - transitionAt));
     setTransitionAt(null); setEndedAt(timestamp); setNow(timestamp); setStatus("finished"); setCompletionOpen(true);
   }
 
   function resetTimer(message = "") {
     setStatus("idle"); setActiveMs(0); setRestMs(0); setStartedAt(null); setEndedAt(null); setTransitionAt(null);
-    setCompletionOpen(false); setNow(Date.now()); setFeedback(message);
+    setPreset(null); setStartSetupOpen(false); setCompletionOpen(false); setNow(Date.now()); setFeedback(message);
   }
 
-  function saveCompletion(form: CompletionForm) {
-    if (!startedAt || !form.task.trim()) return;
-    onSaveSessions(createTimerSessions({ form, mode, effectLabel: effectName(effectId, customEffects), activeMs, restMs, startedAt }));
-    const activity = state.lifeActivities.find((item) => item.id === form.subjectId && item.active !== false);
-    const restMessage = restMs > 0 ? `，暂停 ${shortDuration(restMs)} 已归入休息` : "";
-    resetTimer(`已保存 ${shortDuration(activeMs)} 的${activity?.name ?? "学习"}记录${restMessage}`);
+  function saveCompletion(segments: TimerSegment[]) {
+    if (!startedAt || !segments.length) return;
+    const sessions = createTimerSessions({ segments, mode, effectLabel: effectName(effectId, customEffects), activeMs, restMs });
+    onSaveSessions(sessions);
+    resetTimer(`已按最终安排保存 ${sessions.length} 条时间记录`);
   }
 
   function updateActiveBackground(background: BackgroundSettings) {
@@ -348,14 +421,15 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
         </div>
 
         <footer className="focus-stage-footer">
-          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
+          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{preset && <span className="focus-current-task">当前：{preset.task}</span>}{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
           <div className="focus-main-controls">
-            <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "paused" ? "继续" : "开始"}</span></button>
-            <button type="button" onClick={pauseTimer} disabled={status !== "running"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
-            <button type="button" className="focus-finish" onClick={finishTimer} disabled={(status !== "running" && status !== "paused") || effectiveActiveMs < 1000}><Square size={17} fill="currentColor" /><span>结束</span></button>
+            <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "resting" ? "继续学习" : status === "paused" ? "继续" : "开始"}</span></button>
+            <button type="button" onClick={pauseTimer} disabled={status !== "running" && status !== "resting"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
+            <button type="button" className={`focus-rest ${status === "resting" ? "active" : ""}`} onClick={startRest} disabled={status === "idle" || status === "resting" || status === "finished"}><Coffee size={18} /><span>休息</span></button>
+            <button type="button" className="focus-finish" onClick={finishTimer} disabled={(status !== "running" && status !== "resting" && status !== "paused") || effectiveActiveMs < 1000}><Square size={17} fill="currentColor" /><span>结束</span></button>
             <button type="button" onClick={() => (status === "idle" || window.confirm("确定放弃当前计时？本次时间不会保存。")) && resetTimer("本次计时已清空")} disabled={status === "idle"}><RotateCcw size={18} /><span>清空</span></button>
           </div>
-          <p>{feedback || "所有配置已收进右上角按钮，专注时只看这一块钟表。"}</p>
+          <p>{feedback || "开始时可预设当前任务；结束后可按实际情况确认、修改或拆分记录。"}</p>
         </footer>
       </section>
 
@@ -363,7 +437,8 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
       {settingsDialog === "duration" && <DurationDialog mode={mode} disabled={status !== "idle"} countdownMinutes={countdownMinutes} pomodoroFocusMinutes={pomodoroFocusMinutes} pomodoroBreakMinutes={pomodoroBreakMinutes} onCountdown={setCountdownMinutes} onFocus={setPomodoroFocusMinutes} onBreak={setPomodoroBreakMinutes} onClose={() => setSettingsDialog(null)} />}
       {settingsDialog === "effects" && <EffectsDialog effectId={effectId} customEffects={customEffects} flipLineWidth={flipLineWidth} onSelect={setEffectId} onFlipLineWidth={setFlipLineWidth} onAdd={(effect) => { setCustomEffects((items) => [...items, effect]); setEffectId(effect.id); }} onUpdate={(effect) => setCustomEffects((items) => items.map((item) => item.id === effect.id ? effect : item))} onDelete={deleteCustomEffect} onClose={() => setSettingsDialog(null)} />}
       {settingsDialog === "background" && <BackgroundDialog effectLabel={effectName(effectId, customEffects)} value={activeBackground} onSave={updateActiveBackground} onClose={() => setSettingsDialog(null)} />}
-      {completionOpen && startedAt && <TimerCompletionDialog state={state} activeMs={activeMs} restMs={restMs} startedAt={startedAt} endedAt={endedAt ?? Date.now()} onCancel={() => resetTimer("本次计时已取消，未写入时间记录")} onSave={saveCompletion} />}
+      {startSetupOpen && <TimerStartDialog state={state} onCancel={() => setStartSetupOpen(false)} onStart={beginTimer} />}
+      {completionOpen && startedAt && <TimerCompletionDialog state={state} preset={preset} activeMs={activeMs} restMs={restMs} startedAt={startedAt} endedAt={endedAt ?? Date.now()} onCancel={() => resetTimer("本次计时已取消，未写入时间记录")} onSave={saveCompletion} />}
     </div>
   );
 }
@@ -401,58 +476,166 @@ function BackgroundDialog({ effectLabel, value, onSave, onClose }: { effectLabel
   return <DialogShell title={`设置“${effectLabel}”背景`} kicker="背景" onClose={onClose} footer={<><button type="button" className="secondary-button" onClick={() => setDraft({ ...AUTO_BACKGROUND })}>恢复默认</button><button type="button" className="primary-button" onClick={() => { onSave(draft); onClose(); }}>应用背景</button></>}><div className="background-mode-list">{(["auto","color","gradient","image"] as BackgroundMode[]).map((mode) => <button type="button" key={mode} className={draft.mode === mode ? "active" : ""} onClick={() => setDraft({ ...draft, mode })}>{mode === "auto" ? "跟随效果 / 黑白主题" : mode === "color" ? "纯色" : mode === "gradient" ? "渐变" : "图片"}</button>)}</div>{draft.mode === "color" && <label className="background-color-field"><span>背景颜色</span><input type="color" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></label>}{draft.mode === "gradient" && <div className="background-color-grid"><label><span>起始颜色</span><input type="color" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></label><label><span>结束颜色</span><input type="color" value={draft.secondColor} onChange={(event) => setDraft({ ...draft, secondColor: event.target.value })} /></label></div>}{draft.mode === "image" && <div className="background-upload"><label className="secondary-button"><ImageIcon size={16} />选择本地图片<input hidden type="file" accept="image/*" onChange={upload} /></label>{draft.image && <div style={{ backgroundImage: `url(${JSON.stringify(draft.image)})` }} />}</div>}<p className="focus-dialog-note">内置效果在“跟随效果”时会自动适配亮色和暗色主题；自定义背景按你的设置原样显示。</p></DialogShell>;
 }
 
-function TimerCompletionDialog({ state, activeMs, restMs, startedAt, endedAt, onCancel, onSave }: { state: StudyState; activeMs: number; restMs: number; startedAt: number; endedAt: number; onCancel: () => void; onSave: (form: CompletionForm) => void }) {
-  const firstActivity = state.lifeActivities.find((activity) => activity.active !== false);
-  const [form, setForm] = useState<CompletionForm>({ subjectId: state.subjects[0]?.id ?? firstActivity?.id ?? "math", task: "", completion: 100, focus: 5, note: "" });
-  const selectedActivity = state.lifeActivities.find((activity) => activity.id === form.subjectId && activity.active !== false);
-  const isLifeActivity = Boolean(selectedActivity);
+function CategoryOptions({ state, optional = false }: { state: StudyState; optional?: boolean }) {
+  return <>{optional && <option value="">暂不选择</option>}<optgroup label="学习科目">{state.subjects.map((subject) => <option value={subject.id} key={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option value={activity.id} key={activity.id}>{activity.name}</option>)}</optgroup></>;
+}
+
+function TimerStartDialog({ state, onCancel, onStart }: { state: StudyState; onCancel: () => void; onStart: (preset: TimerPreset | null) => void }) {
+  const [preset, setPreset] = useState<TimerPreset>({ subjectId: "", task: "" });
+  const selectedActivity = state.lifeActivities.find((activity) => activity.id === preset.subjectId && activity.active !== false);
+  const complete = Boolean(preset.subjectId && preset.task.trim());
 
   function changeCategory(subjectId: string) {
-    const previousActivity = state.lifeActivities.find((activity) => activity.id === form.subjectId && activity.active !== false);
+    const previousActivity = state.lifeActivities.find((activity) => activity.id === preset.subjectId && activity.active !== false);
     const nextActivity = state.lifeActivities.find((activity) => activity.id === subjectId && activity.active !== false);
-    const canAutofill = !form.task.trim() || form.task === previousActivity?.name;
-    setForm({ ...form, subjectId, task: nextActivity && canAutofill ? nextActivity.name : form.task });
+    const canAutofill = !preset.task.trim() || preset.task === previousActivity?.name;
+    setPreset({ subjectId, task: canAutofill ? nextActivity?.name ?? "" : preset.task });
   }
 
-  function submit(event: React.FormEvent) { event.preventDefault(); if (form.task.trim()) onSave(form); }
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
-      <form className="record-dialog timer-completion-dialog" onSubmit={submit}>
-        <div className="dialog-heading">
-          <div><p className="card-kicker">本轮已停止</p><h2>保存这段{isLifeActivity ? "活动" : "学习"}记录</h2></div>
-          <button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button>
-        </div>
-        <div className="timer-session-summary">
-          <div><span>有效计时</span><strong>{shortDuration(activeMs)}</strong></div>
-          <div><span>暂停 / 休息</span><strong>{shortDuration(restMs)}</strong></div>
-          <div><span>实际时段</span><strong>{timeValue(new Date(startedAt))}–{timeValue(new Date(endedAt))}</strong></div>
-        </div>
-        <div className="dialog-grid">
-          <label>
-            <span>科目 / 活动</span>
-            <select value={form.subjectId} onChange={(event) => changeCategory(event.target.value)}>
-              <optgroup label="学习科目">
-                {state.subjects.map((subject) => <option value={subject.id} key={subject.id}>{subject.name}</option>)}
-              </optgroup>
-              <optgroup label="生活活动">
-                {state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option value={activity.id} key={activity.id}>{activity.name}</option>)}
-              </optgroup>
-            </select>
-          </label>
-          <label>
-            <span>{isLifeActivity ? "活动内容" : "学习内容"}</span>
-            <input autoFocus placeholder={isLifeActivity ? `例如：${selectedActivity?.name}` : "例如：高数强化第 5 讲与对应习题"} value={form.task} onChange={(event) => setForm({ ...form, task: event.target.value })} />
-          </label>
-          {!isLifeActivity && <label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(event) => setForm({ ...form, completion: Number(event.target.value) })} /></label>}
-          {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(event) => setForm({ ...form, focus: Number(event.target.value) })} /></label>}
-          <label className="wide">
-            <span>{isLifeActivity ? "备注（可选）" : "复盘备注（可选）"}</span>
-            <textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "本轮完成情况、卡点或下一步"} value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
-          </label>
-        </div>
-        <div className="timer-rest-notice"><Coffee size={17} /><span>{restMs > 0 ? `暂停累计 ${shortDuration(restMs)}，确认后将同时生成一条“休息”记录。` : `本轮没有暂停，只生成${selectedActivity?.name ?? "学习"}记录。`}</span></div>
-        <div className="dialog-footer"><span>确认前计时保持停止，不会自动开始下一轮。</span><div><button type="button" className="secondary-button" onClick={onCancel}>取消记录</button><button type="submit" className="primary-button" disabled={!form.task.trim()}><Check size={17} />确定并保存</button></div></div>
-      </form>
-    </div>
-  );
+  return <div className="dialog-backdrop timer-settings-backdrop" role="presentation">
+    <section className="timer-settings-dialog timer-start-dialog" role="dialog" aria-modal="true" aria-labelledby="timer-start-title">
+      <div className="dialog-heading"><div><p className="card-kicker">开始前 · 可选</p><h2 id="timer-start-title">当前正在做什么？</h2></div><button type="button" onClick={onCancel} aria-label="返回计时器"><X size={20} /></button></div>
+      <p className="timer-dialog-intro">提前写下本轮任务，结束时可以直接确认保存；也可以跳过，结束后再补充或拆分。</p>
+      <div className="dialog-grid">
+        <label><span>科目 / 活动</span><select value={preset.subjectId} onChange={(event) => changeCategory(event.target.value)}><CategoryOptions state={state} optional /></select></label>
+        <label><span>{selectedActivity ? "活动内容" : "任务名称"}</span><input autoFocus placeholder={selectedActivity ? `例如：${selectedActivity.name}` : "例如：电路原理强化课第 3 讲"} value={preset.task} onChange={(event) => setPreset({ ...preset, task: event.target.value })} /></label>
+      </div>
+      {(preset.subjectId || preset.task.trim()) && !complete && <div className="timer-validation-message"><AlertTriangle size={16} /><span>要带着预设开始，请同时选择类别并填写任务；也可以直接跳过本次填写。</span></div>}
+      <div className="dialog-footer"><span>预设只属于本轮计时，可在结束后修改。</span><div><button type="button" className="secondary-button" onClick={() => onStart(null)}>不填写，直接开始</button><button type="button" className="primary-button" disabled={!complete} onClick={() => onStart(preset)}><Play size={16} fill="currentColor" />带着任务开始</button></div></div>
+    </section>
+  </div>;
+}
+
+function analyzeSegments(segments: TimerSegment[], boundStart: number, boundEnd: number) {
+  const invalidIds = new Set<string>();
+  const timed = segments.map((segment) => ({ segment, start: timestampValue(segment.start), end: timestampValue(segment.end) }));
+  for (const item of timed) {
+    if (!Number.isFinite(item.start) || !Number.isFinite(item.end) || item.start >= item.end || item.start < boundStart || item.end > boundEnd || !item.segment.subjectId || !item.segment.task.trim()) invalidIds.add(item.segment.id);
+  }
+  const ordered = timed.filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.start < item.end).sort((a, b) => a.start - b.start);
+  let overlap = false;
+  let furthest = ordered[0];
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (furthest && ordered[index].start < furthest.end) {
+      overlap = true;
+      invalidIds.add(ordered[index].segment.id);
+      invalidIds.add(furthest.segment.id);
+    }
+    if (!furthest || ordered[index].end > furthest.end) furthest = ordered[index];
+  }
+  const gaps: { start: number; end: number }[] = [];
+  let cursor = boundStart;
+  for (const item of ordered) {
+    const clippedStart = Math.max(boundStart, item.start);
+    const clippedEnd = Math.min(boundEnd, item.end);
+    if (clippedStart > cursor) gaps.push({ start: cursor, end: clippedStart });
+    cursor = Math.max(cursor, clippedEnd);
+  }
+  if (cursor < boundEnd) gaps.push({ start: cursor, end: boundEnd });
+  return { invalidIds, overlap, gaps };
+}
+
+function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, endedAt, onCancel, onSave }: { state: StudyState; preset: TimerPreset | null; activeMs: number; restMs: number; startedAt: number; endedAt: number; onCancel: () => void; onSave: (segments: TimerSegment[]) => void }) {
+  const bounds = useMemo(() => timerBounds(startedAt, endedAt), [startedAt, endedAt]);
+  const firstActivity = state.lifeActivities.find((activity) => activity.active !== false);
+  const defaultSubjectId = preset?.subjectId ?? state.subjects[0]?.id ?? firstActivity?.id ?? "";
+  const [phase, setPhase] = useState<"confirm" | "edit">(preset?.subjectId && preset.task.trim() ? "confirm" : "edit");
+  const [segments, setSegments] = useState<TimerSegment[]>([{
+    id: crypto.randomUUID(),
+    start: dateTimeValue(bounds.start),
+    end: dateTimeValue(bounds.end),
+    subjectId: defaultSubjectId,
+    task: preset?.task ?? "",
+    completion: 100,
+    focus: 5,
+    note: "",
+  }]);
+  const [allowGaps, setAllowGaps] = useState(false);
+  const [editMessage, setEditMessage] = useState("");
+  const analysis = useMemo(() => analyzeSegments(segments, bounds.start, bounds.end), [segments, bounds.start, bounds.end]);
+  const canSave = segments.length > 0 && analysis.invalidIds.size === 0 && !analysis.overlap && (!analysis.gaps.length || allowGaps);
+  const presetCategory = state.subjects.find((subject) => subject.id === preset?.subjectId)?.name ?? state.lifeActivities.find((activity) => activity.id === preset?.subjectId)?.name ?? "未分类";
+
+  function updateSegment(id: string, patch: Partial<TimerSegment>) {
+    setSegments((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+    setEditMessage("");
+  }
+
+  function changeCategory(segment: TimerSegment, subjectId: string) {
+    const previousActivity = state.lifeActivities.find((activity) => activity.id === segment.subjectId && activity.active !== false);
+    const nextActivity = state.lifeActivities.find((activity) => activity.id === subjectId && activity.active !== false);
+    const canAutofill = !segment.task.trim() || segment.task === previousActivity?.name;
+    updateSegment(segment.id, { subjectId, task: canAutofill ? nextActivity?.name ?? "" : segment.task });
+  }
+
+  function splitSegment(segment: TimerSegment) {
+    const start = timestampValue(segment.start);
+    const end = timestampValue(segment.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 2 * 60_000) {
+      setEditMessage("这个时间段不足 2 分钟，无法继续拆分。");
+      return;
+    }
+    const midpoint = start + Math.floor((end - start) / 120_000) * 60_000;
+    const next: TimerSegment = { ...segment, id: crypto.randomUUID(), start: dateTimeValue(midpoint), task: "", note: "" };
+    setSegments((items) => items.flatMap((item) => item.id === segment.id ? [{ ...item, end: dateTimeValue(midpoint) }, next] : [item]));
+    setEditMessage("");
+  }
+
+  function addSegment() {
+    const gap = analysis.gaps.find((item) => item.end - item.start >= 60_000);
+    if (gap) {
+      setSegments((items) => [...items, { id: crypto.randomUUID(), start: dateTimeValue(gap.start), end: dateTimeValue(gap.end), subjectId: defaultSubjectId, task: "", completion: 100, focus: 5, note: "" }]);
+      setEditMessage("");
+      return;
+    }
+    const longest = [...segments].sort((a, b) => (timestampValue(b.end) - timestampValue(b.start)) - (timestampValue(a.end) - timestampValue(a.start)))[0];
+    if (longest) splitSegment(longest);
+  }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (canSave) onSave([...segments].sort((a, b) => a.start.localeCompare(b.start)));
+  }
+
+  if (phase === "confirm" && preset) {
+    return <div className="dialog-backdrop" role="presentation">
+      <section className="record-dialog timer-completion-dialog timer-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="timer-confirm-title">
+        <div className="dialog-heading"><div><p className="card-kicker">本轮已停止</p><h2 id="timer-confirm-title">是否需要修改本次记录？</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div>
+        <div className="timer-session-summary"><div><span>完整时段</span><strong>{dateTimeRangeLabel(bounds.start, bounds.end)}</strong></div><div><span>科目 / 活动</span><strong>{presetCategory}</strong></div><div><span>本轮有效计时</span><strong>{shortDuration(activeMs)}</strong></div></div>
+        <div className="timer-preset-review"><span className="subject-indicator" /><div><small>将按以下信息保存</small><strong>{preset.task}</strong><span>{dateTimeRangeLabel(bounds.start, bounds.end)} · {presetCategory}</span></div></div>
+        {restMs > 0 && <div className="timer-rest-notice"><Coffee size={17} /><span>本轮曾使用休息计时（累计 {shortDuration(restMs)}）。如需把休息单独记录，请选择“是”并拆分实际时段。</span></div>}
+        <div className="dialog-footer"><span>选择“否”会直接保存这一整段；选择“是”可修改或拆分。</span><div><button type="button" className="secondary-button" onClick={() => setPhase("edit")}><Scissors size={16} />是，修改记录</button><button type="button" className="primary-button" onClick={() => onSave(segments)}><Check size={17} />否，直接保存</button></div></div>
+      </section>
+    </div>;
+  }
+
+  return <div className="dialog-backdrop" role="presentation">
+    <form className="record-dialog timer-completion-dialog timer-segment-dialog" onSubmit={submit}>
+      <div className="dialog-heading"><div><p className="card-kicker">{preset ? "按实际情况修正" : "本轮尚未填写活动"}</p><h2>{preset ? "编辑本次计时记录" : "这段时间你在做什么？"}</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div>
+      <div className="timer-session-summary"><div><span>可分配范围</span><strong>{dateTimeRangeLabel(bounds.start, bounds.end)}</strong></div><div><span>有效计时</span><strong>{shortDuration(activeMs)}</strong></div><div><span>暂停 / 休息</span><strong>{shortDuration(restMs)}</strong></div></div>
+      <div className="timer-segment-toolbar"><div><strong>最终时间段</strong><span>修改整段，或拆成多个真实活动；这里只保存下面的最终结果。</span></div><button type="button" className="secondary-button" onClick={addSegment}><Plus size={16} />添加时间段</button></div>
+      <div className="timer-segment-list">
+        {segments.map((segment, index) => {
+          const selectedActivity = state.lifeActivities.find((activity) => activity.id === segment.subjectId && activity.active !== false);
+          const isInvalid = analysis.invalidIds.has(segment.id);
+          const duration = timestampValue(segment.end) - timestampValue(segment.start);
+          return <section className={`timer-segment-card ${isInvalid ? "invalid" : ""}`} key={segment.id}>
+            <header><div><span>{String(index + 1).padStart(2, "0")}</span><div><strong>时间段 {index + 1}</strong><small>{Number.isFinite(duration) && duration > 0 ? shortDuration(duration) : "请检查起止时间"}</small></div></div><div><button type="button" onClick={() => splitSegment(segment)} title="从中间拆分"><Scissors size={15} />拆分</button><button type="button" onClick={() => setSegments((items) => items.filter((item) => item.id !== segment.id))} title="删除时间段"><Trash2 size={15} /></button></div></header>
+            <div className="timer-segment-fields">
+              <label><span>开始</span><input type="datetime-local" min={dateTimeValue(bounds.start)} max={dateTimeValue(bounds.end)} value={segment.start} onChange={(event) => updateSegment(segment.id, { start: event.target.value })} /></label>
+              <label><span>结束</span><input type="datetime-local" min={dateTimeValue(bounds.start)} max={dateTimeValue(bounds.end)} value={segment.end} onChange={(event) => updateSegment(segment.id, { end: event.target.value })} /></label>
+              <label><span>科目 / 活动</span><select value={segment.subjectId} onChange={(event) => changeCategory(segment, event.target.value)}><CategoryOptions state={state} optional /></select></label>
+              <label><span>{selectedActivity ? "活动内容" : "任务名称"}</span><input placeholder={selectedActivity ? `例如：${selectedActivity.name}` : "填写本时段的真实任务"} value={segment.task} onChange={(event) => updateSegment(segment.id, { task: event.target.value })} /></label>
+              {!selectedActivity && <label><span>完成度：{segment.completion}%</span><input type="range" min="0" max="100" step="5" value={segment.completion} onChange={(event) => updateSegment(segment.id, { completion: Number(event.target.value) })} /></label>}
+              {!selectedActivity && <label><span>专注度：{segment.focus} / 5</span><input type="range" min="1" max="5" value={segment.focus} onChange={(event) => updateSegment(segment.id, { focus: Number(event.target.value) })} /></label>}
+              <label className="wide"><span>备注（可选）</span><textarea placeholder="完成情况、休息方式或下一步" value={segment.note} onChange={(event) => updateSegment(segment.id, { note: event.target.value })} /></label>
+            </div>
+          </section>;
+        })}
+      </div>
+      {(analysis.overlap || analysis.invalidIds.size > 0 || editMessage) && <div className="timer-validation-message error"><AlertTriangle size={17} /><span>{editMessage || (analysis.overlap ? "时间段存在重叠，请调整起止时间后再保存。" : "每段都必须位于本轮范围内，并填写有效的类别、任务和起止时间。")}</span></div>}
+      {analysis.gaps.length > 0 && <div className="timer-gap-panel"><div><AlertTriangle size={17} /><div><strong>还有未分配时间</strong>{analysis.gaps.map((gap) => <span key={`${gap.start}-${gap.end}`}>{dateTimeRangeLabel(gap.start, gap.end)} 尚未分配活动</span>)}</div></div><label><input type="checkbox" checked={allowGaps} onChange={(event) => setAllowGaps(event.target.checked)} /><span>明确将以上时段标记为“未记录”，不写入统计</span></label></div>}
+      <div className="dialog-footer"><span>{analysis.gaps.length ? "补齐空档，或明确标记为未记录后保存。" : `共 ${segments.length} 个时间段，将分别写入每日记录。`}</span><div><button type="button" className="secondary-button" onClick={onCancel}>取消记录</button><button type="submit" className="primary-button" disabled={!canSave}><Check size={17} />保存最终记录</button></div></div>
+    </form>
+  </div>;
 }
