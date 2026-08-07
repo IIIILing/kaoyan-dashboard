@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
   CalendarDays,
@@ -67,6 +68,7 @@ import {
   type DateRange,
   type ScheduleImportCandidate,
 } from "./schedule-data";
+import { findOverlappingSessions } from "./session-time";
 
 type View = "overview" | "today" | "timer" | "records" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
@@ -2013,6 +2015,15 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
   const selectedActivity = lifeActivity(form.subjectId, state.lifeActivities);
   const isLifeActivity = Boolean(selectedActivity);
   const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
+  const rangeStart = new Date(`${form.date}T${form.start}:00`).getTime();
+  const hasValidRange = Boolean(form.date && form.start && form.end) && Number.isFinite(rangeStart) && plannedMinutes > 0;
+  const conflicts = hasValidRange
+    ? findOverlappingSessions(
+      { start: rangeStart, end: rangeStart + plannedMinutes * 60_000 },
+      state.sessions,
+      initial ? new Set([initial.id]) : new Set(),
+    )
+    : [];
   function changeCategory(subjectId: string) {
     const previousActivity = lifeActivity(form.subjectId, state.lifeActivities);
     const nextActivity = lifeActivity(subjectId, state.lifeActivities);
@@ -2021,7 +2032,7 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
   }
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!form.task.trim() || plannedMinutes <= 0) return;
+    if (!form.task.trim() || !hasValidRange || conflicts.length) return;
     onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, task: form.task.trim(), plannedMinutes, actualMinutes: plannedMinutes });
   }
   return (
@@ -2038,7 +2049,8 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
           {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: Number(e.target.value) })} /></label>}
           <label className="wide"><span>{isLifeActivity ? "备注（可选）" : "复盘（可选）"}</span><textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "卡在哪里？下一次从哪里继续？"} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
         </div>
-        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || plannedMinutes <= 0}><Check size={17} />{initial ? "保存修改" : "保存记录"}</button></div></div>
+        {conflicts.length > 0 && <div className="record-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>与已有时间记录重叠</strong>{conflicts.map((session) => <span key={session.id}>{session.date} {session.start}–{session.end} · {session.task}</span>)}<small>请调整本条记录的日期或起止时间；已有记录不会被覆盖。</small></div></div>}
+        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || !hasValidRange || conflicts.length > 0}><Check size={17} />{initial ? "保存修改" : "保存记录"}</button></div></div>
       </form>
     </div>
   );

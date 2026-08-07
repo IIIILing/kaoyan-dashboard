@@ -547,6 +547,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .dialog-grid input[type="range"] { padding: 0; accent-color: var(--accent); box-shadow: none; border: 0; }
 .dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 20px; margin-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .dialog-footer > div { display: flex; gap: 9px; }
+.record-conflict-warning { display: flex; align-items: flex-start; gap: 11px; margin-top: 16px; padding: 13px 14px; border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--line)); border-radius: 8px; color: var(--muted); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.record-conflict-warning > svg { flex: 0 0 auto; margin-top: 1px; color: var(--danger); }
+.record-conflict-warning strong, .record-conflict-warning span, .record-conflict-warning small { display: block; }
+.record-conflict-warning strong { margin-bottom: 5px; color: var(--text); font-size: 11px; }
+.record-conflict-warning span { font-size: 9px; line-height: 1.65; font-variant-numeric: tabular-nums; }
+.record-conflict-warning small { margin-top: 6px; font-size: 9px; line-height: 1.55; }
 .backup-content { display: grid; gap: 18px; }
 .anchor-field { width: min(240px, 100%); }
 .anchor-field > span, .date-range-fields label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { StudySession, StudyState } from "./study-state";
+import { findOverlappingSessions } from "./session-time";
 
 type TimerMode = "stopwatch" | "countdown" | "pomodoro";
 type TimerStatus = "idle" | "running" | "resting" | "paused" | "finished";
@@ -506,11 +507,22 @@ function TimerStartDialog({ state, onCancel, onStart }: { state: StudyState; onC
   </div>;
 }
 
-function analyzeSegments(segments: TimerSegment[], boundStart: number, boundEnd: number) {
+function analyzeSegments(segments: TimerSegment[], boundStart: number, boundEnd: number, existingSessions: StudySession[]) {
   const invalidIds = new Set<string>();
+  const fieldInvalidIds = new Set<string>();
+  const existingConflicts = new Map<string, StudySession[]>();
   const timed = segments.map((segment) => ({ segment, start: timestampValue(segment.start), end: timestampValue(segment.end) }));
   for (const item of timed) {
-    if (!Number.isFinite(item.start) || !Number.isFinite(item.end) || item.start >= item.end || item.start < boundStart || item.end > boundEnd || !item.segment.subjectId || !item.segment.task.trim()) invalidIds.add(item.segment.id);
+    if (!Number.isFinite(item.start) || !Number.isFinite(item.end) || item.start >= item.end || item.start < boundStart || item.end > boundEnd || !item.segment.subjectId || !item.segment.task.trim()) {
+      invalidIds.add(item.segment.id);
+      fieldInvalidIds.add(item.segment.id);
+      continue;
+    }
+    const conflicts = findOverlappingSessions({ start: item.start, end: item.end }, existingSessions);
+    if (conflicts.length) {
+      invalidIds.add(item.segment.id);
+      existingConflicts.set(item.segment.id, conflicts);
+    }
   }
   const ordered = timed.filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.start < item.end).sort((a, b) => a.start - b.start);
   let overlap = false;
@@ -532,7 +544,7 @@ function analyzeSegments(segments: TimerSegment[], boundStart: number, boundEnd:
     cursor = Math.max(cursor, clippedEnd);
   }
   if (cursor < boundEnd) gaps.push({ start: cursor, end: boundEnd });
-  return { invalidIds, overlap, gaps };
+  return { invalidIds, fieldInvalidIds, overlap, gaps, existingConflicts };
 }
 
 function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, endedAt, onCancel, onSave }: { state: StudyState; preset: TimerPreset | null; activeMs: number; restMs: number; startedAt: number; endedAt: number; onCancel: () => void; onSave: (segments: TimerSegment[]) => void }) {
@@ -552,8 +564,9 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
   }]);
   const [allowGaps, setAllowGaps] = useState(false);
   const [editMessage, setEditMessage] = useState("");
-  const analysis = useMemo(() => analyzeSegments(segments, bounds.start, bounds.end), [segments, bounds.start, bounds.end]);
+  const analysis = useMemo(() => analyzeSegments(segments, bounds.start, bounds.end, state.sessions), [segments, bounds.start, bounds.end, state.sessions]);
   const canSave = segments.length > 0 && analysis.invalidIds.size === 0 && !analysis.overlap && (!analysis.gaps.length || allowGaps);
+  const conflictingSessions = [...new Map([...analysis.existingConflicts.values()].flat().map((session) => [session.id, session])).values()];
   const presetCategory = state.subjects.find((subject) => subject.id === preset?.subjectId)?.name ?? state.lifeActivities.find((activity) => activity.id === preset?.subjectId)?.name ?? "未分类";
 
   function updateSegment(id: string, patch: Partial<TimerSegment>) {
@@ -603,8 +616,9 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
         <div className="dialog-heading"><div><p className="card-kicker">本轮已停止</p><h2 id="timer-confirm-title">是否需要修改本次记录？</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div>
         <div className="timer-session-summary"><div><span>完整时段</span><strong>{dateTimeRangeLabel(bounds.start, bounds.end)}</strong></div><div><span>科目 / 活动</span><strong>{presetCategory}</strong></div><div><span>本轮有效计时</span><strong>{shortDuration(activeMs)}</strong></div></div>
         <div className="timer-preset-review"><span className="subject-indicator" /><div><small>将按以下信息保存</small><strong>{preset.task}</strong><span>{dateTimeRangeLabel(bounds.start, bounds.end)} · {presetCategory}</span></div></div>
+        {conflictingSessions.length > 0 && <div className="record-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>这段时间与已有记录重叠</strong>{conflictingSessions.map((session) => <span key={session.id}>{session.date} {session.start}–{session.end} · {session.task}</span>)}<small>请选择“是，修改记录”并调整时间段后再保存。</small></div></div>}
         {restMs > 0 && <div className="timer-rest-notice"><Coffee size={17} /><span>本轮曾使用休息计时（累计 {shortDuration(restMs)}）。如需把休息单独记录，请选择“是”并拆分实际时段。</span></div>}
-        <div className="dialog-footer"><span>选择“否”会直接保存这一整段；选择“是”可修改或拆分。</span><div><button type="button" className="secondary-button" onClick={() => setPhase("edit")}><Scissors size={16} />是，修改记录</button><button type="button" className="primary-button" onClick={() => onSave(segments)}><Check size={17} />否，直接保存</button></div></div>
+        <div className="dialog-footer"><span>{conflictingSessions.length ? "已有记录保持不变，请先修改本次时段。" : "选择“否”会直接保存这一整段；选择“是”可修改或拆分。"}</span><div><button type="button" className="secondary-button" onClick={() => setPhase("edit")}><Scissors size={16} />是，修改记录</button><button type="button" className="primary-button" disabled={conflictingSessions.length > 0} onClick={() => onSave(segments)}><Check size={17} />否，直接保存</button></div></div>
       </section>
     </div>;
   }
@@ -633,7 +647,8 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
           </section>;
         })}
       </div>
-      {(analysis.overlap || analysis.invalidIds.size > 0 || editMessage) && <div className="timer-validation-message error"><AlertTriangle size={17} /><span>{editMessage || (analysis.overlap ? "时间段存在重叠，请调整起止时间后再保存。" : "每段都必须位于本轮范围内，并填写有效的类别、任务和起止时间。")}</span></div>}
+      {(analysis.overlap || analysis.fieldInvalidIds.size > 0 || editMessage) && <div className="timer-validation-message error"><AlertTriangle size={17} /><span>{editMessage || (analysis.overlap ? "时间段存在重叠，请调整起止时间后再保存。" : "每段都必须位于本轮范围内，并填写有效的类别、任务和起止时间。")}</span></div>}
+      {conflictingSessions.length > 0 && <div className="record-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>本次分段与已有记录重叠</strong>{conflictingSessions.map((session) => <span key={session.id}>{session.date} {session.start}–{session.end} · {session.task}</span>)}<small>请调整标红时间段；已有记录不会被覆盖或重复统计。</small></div></div>}
       {analysis.gaps.length > 0 && <div className="timer-gap-panel"><div><AlertTriangle size={17} /><div><strong>还有未分配时间</strong>{analysis.gaps.map((gap) => <span key={`${gap.start}-${gap.end}`}>{dateTimeRangeLabel(gap.start, gap.end)} 尚未分配活动</span>)}</div></div><label><input type="checkbox" checked={allowGaps} onChange={(event) => setAllowGaps(event.target.checked)} /><span>明确将以上时段标记为“未记录”，不写入统计</span></label></div>}
       <div className="dialog-footer"><span>{analysis.gaps.length ? "补齐空档，或明确标记为未记录后保存。" : `共 ${segments.length} 个时间段，将分别写入每日记录。`}</span><div><button type="button" className="secondary-button" onClick={onCancel}>取消记录</button><button type="submit" className="primary-button" disabled={!canSave}><Check size={17} />保存最终记录</button></div></div>
     </form>
