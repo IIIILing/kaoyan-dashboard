@@ -12,6 +12,7 @@ import {
   type ExperienceSubject,
 } from "./experience-data";
 import type { StudyState } from "./study-state";
+import ExperienceBenchmarkPanel from "./ExperienceBenchmarkPanel";
 
 type Props = {
   state: StudyState;
@@ -167,6 +168,8 @@ export default function ExperiencesView({ state, updateState }: Props) {
           <input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importExperiences(file); event.target.value = ""; }} />
         </div>
       </section>
+
+      <ExperienceBenchmarkPanel state={state} updateState={updateState} />
 
       <section className="experience-layout">
         <aside className="experience-index">

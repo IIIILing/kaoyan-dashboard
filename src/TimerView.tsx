@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { StudySession, StudyState } from "./study-state";
 import { findOverlappingSessions } from "./session-time";
 
@@ -68,6 +68,16 @@ type StoredTimer = {
 type TimerPreset = {
   subjectId: string;
   task: string;
+  planItemId?: string;
+  planDate?: string;
+  plannedMinutes?: number;
+};
+
+export type TimerLaunchRequest = TimerPreset & {
+  id: string;
+  planItemId: string;
+  planDate: string;
+  plannedMinutes: number;
 };
 
 type TimerSegment = TimerPreset & {
@@ -139,7 +149,13 @@ function safeStoredTimer(storageKey: string): StoredTimer | null {
       endedAt: typeof parsed.endedAt === "number" ? parsed.endedAt : null,
       transitionAt: parsed.status !== "paused" && typeof parsed.transitionAt === "number" ? parsed.transitionAt : null,
       preset: parsed.preset && typeof parsed.preset.subjectId === "string" && typeof parsed.preset.task === "string"
-        ? { subjectId: parsed.preset.subjectId, task: parsed.preset.task }
+        ? {
+            subjectId: parsed.preset.subjectId,
+            task: parsed.preset.task,
+            planItemId: typeof parsed.preset.planItemId === "string" ? parsed.preset.planItemId : undefined,
+            planDate: typeof parsed.preset.planDate === "string" ? parsed.preset.planDate : undefined,
+            plannedMinutes: typeof parsed.preset.plannedMinutes === "number" ? parsed.preset.plannedMinutes : undefined,
+          }
         : null,
     };
   } catch {
@@ -247,6 +263,7 @@ function createTimerSessions({ segments, mode, effectLabel, activeMs, restMs }: 
         const minutes = Math.max(1, Math.round((pieceEnd - cursor) / 60_000));
         sessions.push({
           id: crypto.randomUUID(),
+          planItemId: segment.planItemId,
           date: localDateValue(cursorDate),
           start: timeValue(cursorDate),
           end: timeValue(new Date(pieceEnd)),
@@ -264,11 +281,13 @@ function createTimerSessions({ segments, mode, effectLabel, activeMs, restMs }: 
     });
 }
 
-export default function TimerView({ state, accountId, onSaveSessions, onExit }: {
+export default function TimerView({ state, accountId, launchRequest, onLaunchHandled, onSaveSessions, onExit }: {
   state: StudyState;
   accountId: string;
   sidebarHidden: boolean;
   onSidebarHiddenChange: (hidden: boolean) => void;
+  launchRequest: TimerLaunchRequest | null;
+  onLaunchHandled: () => void;
   onSaveSessions: (sessions: StudySession[]) => void;
   onExit: () => void;
 }) {
@@ -295,6 +314,15 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
   const [startSetupOpen, setStartSetupOpen] = useState(false);
   const [settingsDialog, setSettingsDialog] = useState<SettingsDialog>(null);
   const [feedback, setFeedback] = useState("");
+  const handledLaunchIdRef = useRef("");
+
+  useEffect(() => {
+    if (!launchRequest || handledLaunchIdRef.current === launchRequest.id) return;
+    handledLaunchIdRef.current = launchRequest.id;
+    if (status === "idle") beginTimer(launchRequest);
+    else setFeedback(`“${launchRequest.task}”尚未开始：请先结束或清空当前计时。`);
+    onLaunchHandled();
+  }, [launchRequest, onLaunchHandled, status]);
 
   useEffect(() => {
     if (status === "idle" || status === "paused" || status === "finished") return;
@@ -422,7 +450,7 @@ export default function TimerView({ state, accountId, onSaveSessions, onExit }: 
         </div>
 
         <footer className="focus-stage-footer">
-          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{preset && <span className="focus-current-task">当前：{preset.task}</span>}{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
+          <div className="focus-session-meta"><span>有效 {clockText(effectiveActiveMs)}</span><span>休息 {clockText(effectiveRestMs)}</span>{preset && <span className="focus-current-task">当前：{preset.task}</span>}{preset?.planItemId && <span>关联计划 · {preset.plannedMinutes ?? 0} 分钟</span>}{remainingMs !== null && <span>剩余 {clockText(remainingMs, true)}</span>}{mode === "pomodoro" && <span>建议休息 {pomodoroBreakMinutes} 分</span>}</div>
           <div className="focus-main-controls">
             <button type="button" className="focus-start" onClick={startTimer} disabled={status === "running" || status === "finished"}><Play size={20} fill="currentColor" /><span>{status === "resting" ? "继续学习" : status === "paused" ? "继续" : "开始"}</span></button>
             <button type="button" onClick={pauseTimer} disabled={status !== "running" && status !== "resting"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
@@ -554,6 +582,9 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
   const [phase, setPhase] = useState<"confirm" | "edit">(preset?.subjectId && preset.task.trim() ? "confirm" : "edit");
   const [segments, setSegments] = useState<TimerSegment[]>([{
     id: crypto.randomUUID(),
+    planItemId: preset?.planItemId,
+    planDate: preset?.planDate,
+    plannedMinutes: preset?.plannedMinutes,
     start: dateTimeValue(bounds.start),
     end: dateTimeValue(bounds.end),
     subjectId: defaultSubjectId,
@@ -589,7 +620,7 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
       return;
     }
     const midpoint = start + Math.floor((end - start) / 120_000) * 60_000;
-    const next: TimerSegment = { ...segment, id: crypto.randomUUID(), start: dateTimeValue(midpoint), task: "", note: "" };
+    const next: TimerSegment = { ...segment, id: crypto.randomUUID(), start: dateTimeValue(midpoint), task: segment.planItemId ? segment.task : "", note: "" };
     setSegments((items) => items.flatMap((item) => item.id === segment.id ? [{ ...item, end: dateTimeValue(midpoint) }, next] : [item]));
     setEditMessage("");
   }
@@ -597,7 +628,7 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
   function addSegment() {
     const gap = analysis.gaps.find((item) => item.end - item.start >= 60_000);
     if (gap) {
-      setSegments((items) => [...items, { id: crypto.randomUUID(), start: dateTimeValue(gap.start), end: dateTimeValue(gap.end), subjectId: defaultSubjectId, task: "", completion: 100, focus: 5, note: "" }]);
+      setSegments((items) => [...items, { id: crypto.randomUUID(), planItemId: preset?.planItemId, planDate: preset?.planDate, plannedMinutes: preset?.plannedMinutes, start: dateTimeValue(gap.start), end: dateTimeValue(gap.end), subjectId: defaultSubjectId, task: preset?.planItemId ? preset.task : "", completion: 100, focus: 5, note: "" }]);
       setEditMessage("");
       return;
     }
@@ -615,7 +646,7 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
       <section className="record-dialog timer-completion-dialog timer-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="timer-confirm-title">
         <div className="dialog-heading"><div><p className="card-kicker">本轮已停止</p><h2 id="timer-confirm-title">是否需要修改本次记录？</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div>
         <div className="timer-session-summary"><div><span>完整时段</span><strong>{dateTimeRangeLabel(bounds.start, bounds.end)}</strong></div><div><span>科目 / 活动</span><strong>{presetCategory}</strong></div><div><span>本轮有效计时</span><strong>{shortDuration(activeMs)}</strong></div></div>
-        <div className="timer-preset-review"><span className="subject-indicator" /><div><small>将按以下信息保存</small><strong>{preset.task}</strong><span>{dateTimeRangeLabel(bounds.start, bounds.end)} · {presetCategory}</span></div></div>
+        <div className="timer-preset-review"><span className="subject-indicator" /><div><small>{preset.planItemId ? "将保存并关联回原计划" : "将按以下信息保存"}</small><strong>{preset.task}</strong><span>{dateTimeRangeLabel(bounds.start, bounds.end)} · {presetCategory}{preset.planItemId ? ` · 计划 ${preset.plannedMinutes ?? 0} 分钟` : ""}</span></div></div>
         {conflictingSessions.length > 0 && <div className="record-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>这段时间与已有记录重叠</strong>{conflictingSessions.map((session) => <span key={session.id}>{session.date} {session.start}–{session.end} · {session.task}</span>)}<small>请选择“是，修改记录”并调整时间段后再保存。</small></div></div>}
         {restMs > 0 && <div className="timer-rest-notice"><Coffee size={17} /><span>本轮曾使用休息计时（累计 {shortDuration(restMs)}）。如需把休息单独记录，请选择“是”并拆分实际时段。</span></div>}
         <div className="dialog-footer"><span>{conflictingSessions.length ? "已有记录保持不变，请先修改本次时段。" : "选择“否”会直接保存这一整段；选择“是”可修改或拆分。"}</span><div><button type="button" className="secondary-button" onClick={() => setPhase("edit")}><Scissors size={16} />是，修改记录</button><button type="button" className="primary-button" disabled={conflictingSessions.length > 0} onClick={() => onSave(segments)}><Check size={17} />否，直接保存</button></div></div>
@@ -627,6 +658,7 @@ function TimerCompletionDialog({ state, preset, activeMs, restMs, startedAt, end
     <form className="record-dialog timer-completion-dialog timer-segment-dialog" onSubmit={submit}>
       <div className="dialog-heading"><div><p className="card-kicker">{preset ? "按实际情况修正" : "本轮尚未填写活动"}</p><h2>{preset ? "编辑本次计时记录" : "这段时间你在做什么？"}</h2></div><button type="button" onClick={onCancel} aria-label="取消记录"><X size={20} /></button></div>
       <div className="timer-session-summary"><div><span>可分配范围</span><strong>{dateTimeRangeLabel(bounds.start, bounds.end)}</strong></div><div><span>有效计时</span><strong>{shortDuration(activeMs)}</strong></div><div><span>暂停 / 休息</span><strong>{shortDuration(restMs)}</strong></div></div>
+      {preset?.planItemId && <div className="timer-linked-plan-note"><Check size={16} /><span>下面所有拆分时间段都会关联回 {preset.planDate} 的“{preset.task}”。</span></div>}
       <div className="timer-segment-toolbar"><div><strong>最终时间段</strong><span>修改整段，或拆成多个真实活动；这里只保存下面的最终结果。</span></div><button type="button" className="secondary-button" onClick={addSegment}><Plus size={16} />添加时间段</button></div>
       <div className="timer-segment-list">
         {segments.map((segment, index) => {
