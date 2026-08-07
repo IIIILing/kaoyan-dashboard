@@ -5,7 +5,16 @@ export type Phase = {
   name: string;
   weight: number;
   progress: number;
+  startDate?: string;
+  targetDate?: string;
+  targetProgress?: number;
+  progressHistory?: PhaseProgressSnapshot[];
   resources: StudyResource[];
+};
+
+export type PhaseProgressSnapshot = {
+  date: string;
+  progress: number;
 };
 
 export type StudyResource = {
@@ -28,6 +37,7 @@ export type Subject = {
 
 export type StudySession = {
   id: string;
+  planItemId?: string;
   date: string;
   start: string;
   end: string;
@@ -100,6 +110,51 @@ export type PlanTemplate = {
   items: PlanItem[];
 };
 
+export type ExamPaperType = "past" | "mock" | "chapter" | "other";
+
+export type ExamSection = {
+  id: string;
+  name: string;
+  score: number;
+  fullScore: number;
+  wrongCount: number;
+};
+
+export type ExamRecord = {
+  id: string;
+  subjectId: string;
+  date: string;
+  paperType: ExamPaperType;
+  paperName: string;
+  score: number;
+  fullScore: number;
+  durationMinutes: number;
+  correctRate: number;
+  wrongCount: number;
+  sections: ExamSection[];
+  note: string;
+};
+
+export type ReviewItemKind = "knowledge" | "mistake" | "exam";
+
+export type ReviewItem = {
+  id: string;
+  subjectId: string;
+  kind: ReviewItemKind;
+  title: string;
+  detail: string;
+  source: string;
+  mastery: number;
+  nextReviewDate: string;
+  reviewCount: number;
+  createdAt: string;
+  lastReviewedAt?: string;
+};
+
+export type DataSafetyStatus = {
+  lastExternalBackupAt: string;
+};
+
 export type ThemeColors = {
   bg: string;
   surface: string;
@@ -146,6 +201,9 @@ export type StudyState = {
   plans: DailyPlan[];
   schedule?: ScheduleDay[];
   planTemplates: PlanTemplate[];
+  examRecords: ExamRecord[];
+  reviewItems: ReviewItem[];
+  dataSafety: DataSafetyStatus;
   experiences: ExperiencePost[];
   fastestExperienceId: string;
 };
@@ -330,6 +388,9 @@ export const defaultStudyState: StudyState = {
   plans: [],
   schedule: [],
   planTemplates: [],
+  examRecords: [],
+  reviewItems: [],
+  dataSafety: { lastExternalBackupAt: "" },
   experiences: defaultExperiences,
   fastestExperienceId: DEFAULT_FASTEST_EXPERIENCE_ID,
 };

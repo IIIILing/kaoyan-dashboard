@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
   CalendarDays,
@@ -6,9 +7,11 @@ import {
   ChevronRight,
   CircleGauge,
   Clock3,
+  Copy,
   HardDrive,
   Download,
   FileUp,
+  FilterX,
   Home,
   ListTodo,
   Moon,
@@ -17,15 +20,19 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Play,
   Plus,
   RotateCcw,
   Save,
+  Search,
   Settings,
   SlidersHorizontal,
   Sun,
   Target,
   TimerReset,
   Trash2,
+  TrendingUp,
+  Undo2,
   UserPlus,
   Users,
   X,
@@ -37,6 +44,7 @@ import {
   projectProgress,
   subjectProgress,
   type DailyPlan,
+  type Phase,
   type PlanItem,
   type PlanTemplate,
   type ScoreWeights,
@@ -56,7 +64,10 @@ import {
   normalizeExperiences,
 } from "./experience-data";
 import ExperiencesView from "./ExperiencesView";
-import TimerView from "./TimerView";
+import ExamsView from "./ExamsView";
+import ReviewView from "./ReviewView";
+import WeeklyInsights from "./WeeklyInsights";
+import TimerView, { type TimerLaunchRequest } from "./TimerView";
 import {
   createScheduleArchive,
   mergeImportedPlans,
@@ -67,8 +78,12 @@ import {
   type DateRange,
   type ScheduleImportCandidate,
 } from "./schedule-data";
+import { findOverlappingPlanItems, scheduledTimeRange } from "./time-range";
+import { phaseForecast, recordPhaseProgress } from "./progress-forecast";
+import { mergeExamRecords, normalizeExamRecords } from "./exam-data";
+import { mergeReviewItems, normalizeReviewItems } from "./review-data";
 
-type View = "overview" | "today" | "timer" | "records" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
+type View = "overview" | "today" | "timer" | "records" | "exams" | "reviews" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
 type BackupMode = "export" | "import";
 type DashboardAccount = {
@@ -82,12 +97,20 @@ type AccountRegistry = {
   activeAccountId: string;
   accounts: DashboardAccount[];
 };
+type RecordDraft = Partial<Pick<StudySession, "date" | "start" | "end" | "subjectId" | "task" | "note">>;
+type UndoAction = {
+  id: string;
+  message: string;
+  restore: () => void;
+};
 
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "overview", label: "总览", icon: Home },
   { id: "today", label: "今日计划", icon: ListTodo },
   { id: "timer", label: "专注计时", icon: TimerReset },
   { id: "records", label: "时间记录", icon: Clock3 },
+  { id: "exams", label: "成绩趋势", icon: TrendingUp },
+  { id: "reviews", label: "复习队列", icon: CalendarDays },
   { id: "subjects", label: "科目进度", icon: BookOpen },
   { id: "experiences", label: "经验贴", icon: NotebookText },
   { id: "weekly", label: "周报", icon: BarChart3 },
@@ -200,6 +223,12 @@ function normalizeStudyState(value: unknown): StudyState | null {
       ...subject,
       phases: subject.phases.map((phase) => ({
         ...phase,
+        startDate: typeof phase.startDate === "string" ? phase.startDate : undefined,
+        targetDate: typeof phase.targetDate === "string" ? phase.targetDate : undefined,
+        targetProgress: Number.isFinite(Number(phase.targetProgress)) ? Math.min(100, Math.max(1, Number(phase.targetProgress))) : 100,
+        progressHistory: Array.isArray(phase.progressHistory)
+          ? phase.progressHistory.filter((snapshot) => snapshot && typeof snapshot.date === "string" && Number.isFinite(Number(snapshot.progress))).map((snapshot) => ({ date: snapshot.date, progress: Math.min(100, Math.max(0, Number(snapshot.progress))) }))
+          : [],
         resources: Array.isArray(phase.resources) ? phase.resources : [],
       })),
     })),
@@ -207,6 +236,12 @@ function normalizeStudyState(value: unknown): StudyState | null {
     plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
     schedule: [],
     planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
+    examRecords: normalizeExamRecords(parsed.examRecords),
+    reviewItems: normalizeReviewItems(parsed.reviewItems),
+    dataSafety: {
+      ...defaultStudyState.dataSafety,
+      ...parsed.dataSafety,
+    },
     experiences: normalizeExperiences(parsed.experiences),
     fastestExperienceId: typeof parsed.fastestExperienceId === "string"
       && normalizeExperiences(parsed.experiences).some((item) => item.id === parsed.fastestExperienceId)
@@ -236,11 +271,13 @@ function normalizeStudyState(value: unknown): StudyState | null {
     subjects: normalized.subjects.map((subject) => {
       const rapid = defaultStudyState.subjects.find((item) => item.id === subject.id);
       if (!rapid) return subject;
+      const phaseById = new Map(subject.phases.map((phase) => [phase.id, phase]));
       const progressById = new Map(subject.phases.map((phase) => [phase.id, phase.progress]));
       const resourcesById = new Map(subject.phases.map((phase) => [phase.id, phase.resources]));
       const rapidIds = new Set(rapid.phases.map((phase) => phase.id));
       const migratedPhases = rapid.phases.map((phase) => {
         const candidates = legacyProgressSource[phase.id] ?? [phase.id];
+        const savedPhase = candidates.map((id) => phaseById.get(id)).find((item) => item?.startDate || item?.targetDate || item?.progressHistory?.length);
         const savedProgress = candidates
           .map((id) => progressById.get(id))
           .filter((value): value is number => typeof value === "number");
@@ -254,6 +291,10 @@ function normalizeStudyState(value: unknown): StudyState | null {
         return {
           ...phase,
           progress: savedProgress.length ? Math.max(...savedProgress) : phase.progress,
+          startDate: savedPhase?.startDate,
+          targetDate: savedPhase?.targetDate,
+          targetProgress: savedPhase?.targetProgress ?? 100,
+          progressHistory: savedPhase?.progressHistory ?? [],
           resources,
         };
       });
@@ -577,16 +618,21 @@ export default function Dashboard() {
   const [planDate, setPlanDate] = useState(localDate());
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
+  const [lastSavedAt, setLastSavedAt] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordEditing, setRecordEditing] = useState<StudySession | null>(null);
+  const [recordDraft, setRecordDraft] = useState<RecordDraft | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
   const [planEditing, setPlanEditing] = useState<PlanItem | null>(null);
+  const [timerLaunch, setTimerLaunch] = useState<TimerLaunchRequest | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
   const [importCandidate, setImportCandidate] = useState<ScheduleImportCandidate | null>(null);
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const undoTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(THEME_KEY);
@@ -664,6 +710,7 @@ export default function Dashboard() {
       setState(initialState);
     }
     setSaveStatus("saved");
+    setLastSavedAt(new Date().toISOString());
     setLoaded(true);
   }, []);
 
@@ -673,6 +720,7 @@ export default function Dashboard() {
     const timer = window.setTimeout(() => {
       window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
       setSaveStatus("saved");
+      setLastSavedAt(new Date().toISOString());
     }, 250);
     return () => window.clearTimeout(timer);
   }, [state, loaded, activeAccountId]);
@@ -690,6 +738,10 @@ export default function Dashboard() {
   useEffect(() => {
     applyThemePalette(state.appearance, theme);
   }, [state.appearance, theme]);
+
+  useEffect(() => () => {
+    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
+  }, []);
 
   const today = localDate();
   const todaySessions = useMemo(() => sessionsForDate(state.sessions, today), [state.sessions, today]);
@@ -777,10 +829,15 @@ export default function Dashboard() {
     setState(loadAccountState(nextAccount));
     setRecordOpen(false);
     setRecordEditing(null);
+    setRecordDraft(null);
     setPlanOpen(false);
     setPlanEditing(null);
+    setTimerLaunch(null);
     setBackupMode(null);
     setImportCandidate(null);
+    setUndoAction(null);
+    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = null;
     setSidebarHidden(false);
     setView("overview");
     setSaveStatus("saved");
@@ -856,6 +913,29 @@ export default function Dashboard() {
     setState((current) => withUnifiedSchedule(updater(current)));
   }
 
+  function offerUndo(message: string, restore: () => void) {
+    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
+    const id = crypto.randomUUID();
+    setUndoAction({ id, message, restore });
+    undoTimerRef.current = window.setTimeout(() => {
+      setUndoAction((current) => current?.id === id ? null : current);
+      undoTimerRef.current = null;
+    }, 8_000);
+  }
+
+  function undoLastAction() {
+    if (!undoAction) return;
+    const restore = undoAction.restore;
+    dismissUndo();
+    restore();
+  }
+
+  function dismissUndo() {
+    if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = null;
+    setUndoAction(null);
+  }
+
   function addSession(session: StudySession) {
     updateState((current) => ({
       ...current,
@@ -864,6 +944,7 @@ export default function Dashboard() {
         : [...current.sessions, session],
     }));
     setRecordEditing(null);
+    setRecordDraft(null);
     setRecordOpen(false);
   }
 
@@ -886,21 +967,47 @@ export default function Dashboard() {
     });
   }
 
-  function openNewRecord() {
+  function openNewRecord(date = localDate()) {
     setRecordEditing(null);
+    setRecordDraft({ date });
     setRecordOpen(true);
   }
 
   function openEditRecord(session: StudySession) {
     setRecordEditing(session);
+    setRecordDraft(null);
     setRecordOpen(true);
   }
 
+  function startPlanTimer(item: PlanItem) {
+    if (planDate !== localDate()) {
+      window.alert("只能从今天的计划开始计时。请先切换回今天。");
+      return;
+    }
+    setTimerLaunch({
+      id: crypto.randomUUID(),
+      planItemId: item.id,
+      planDate,
+      plannedMinutes: minutesBetween(item.start, item.end, item.subjectId === "sleep"),
+      subjectId: item.subjectId,
+      task: item.task,
+    });
+    setView("timer");
+  }
+
   function deleteSession(id: string) {
+    const deleted = state.sessions.find((item) => item.id === id);
+    if (!deleted) return;
     updateState((current) => ({
       ...current,
       sessions: current.sessions.filter((item) => item.id !== id),
     }));
+    offerUndo(`已删除实际记录“${deleted.task}”`, () => updateState((current) => ({
+      ...current,
+      sessions: current.sessions.some((item) => item.id === deleted.id)
+        ? current.sessions
+        : [...current.sessions, deleted],
+    })));
   }
 
   function addPlanItem(item: PlanItem) {
@@ -933,12 +1040,23 @@ export default function Dashboard() {
   }
 
   function deletePlanItem(id: string) {
+    const deletedPlan = state.plans.find((plan) => plan.date === planDate);
+    const deleted = deletedPlan?.items.find((item) => item.id === id);
+    if (!deletedPlan || !deleted) return;
     updateState((current) => ({
       ...current,
       plans: current.plans.map((plan) => plan.date === planDate
         ? { ...plan, items: plan.items.filter((item) => item.id !== id) }
         : plan),
     }));
+    offerUndo(`已删除计划“${deleted.task}”`, () => updateState((current) => ({
+      ...current,
+      plans: current.plans.some((plan) => plan.date === deletedPlan.date)
+        ? current.plans.map((plan) => plan.date === deletedPlan.date && !plan.items.some((item) => item.id === deleted.id)
+          ? { ...plan, items: [...plan.items, deleted] }
+          : plan)
+        : [...current.plans, { date: deletedPlan.date, items: [deleted] }],
+    })));
   }
 
   function exportData(range: DateRange) {
@@ -947,6 +1065,7 @@ export default function Dashboard() {
       JSON.stringify(archive, null, 2),
       `kaoyan-schedule-${range.from}-${range.to}.json`,
     );
+    updateState((current) => ({ ...current, dataSafety: { ...current.dataSafety, lastExternalBackupAt: new Date().toISOString() } }));
     setBackupMode(null);
   }
 
@@ -969,19 +1088,24 @@ export default function Dashboard() {
     if (!importCandidate) return;
     const selectedSessions = importCandidate.sessions.filter((item) => isInRange(item.date, range));
     const selectedPlans = importCandidate.plans.filter((item) => isInRange(item.date, range));
+    const selectedExamRecords = importCandidate.examRecords.filter((item) => isInRange(item.date, range));
     const sessionMerge = mergeImportedSessions(state.sessions, selectedSessions);
     const planMerge = mergeImportedPlans(state.plans, selectedPlans);
     const templateMerge = mergeImportedTemplates(state.planTemplates, importCandidate.planTemplates);
+    const examMerge = mergeExamRecords(state.examRecords, selectedExamRecords);
+    const reviewMerge = mergeReviewItems(state.reviewItems, importCandidate.reviewItems);
     setState((current) => withUnifiedSchedule({
       ...current,
       sessions: sessionMerge.sessions,
       plans: planMerge.plans,
       planTemplates: templateMerge.templates,
+      examRecords: examMerge.records,
+      reviewItems: reviewMerge.items,
     }));
     setBackupMode(null);
     setImportCandidate(null);
     window.alert(
-      `导入完成。时间记录：新增 ${sessionMerge.report.added} 条，重复 ${sessionMerge.report.duplicates} 条，顺延 ${sessionMerge.report.shifted} 条，跳过 ${sessionMerge.report.skipped} 条；今日计划：新增 ${planMerge.report.added} 条，重复 ${planMerge.report.duplicates} 条，顺延 ${planMerge.report.shifted} 条，跳过 ${planMerge.report.skipped} 条；计划模板：新增 ${templateMerge.added} 个，重复 ${templateMerge.duplicates} 个。`,
+      `导入完成。时间记录：新增 ${sessionMerge.report.added} 条，重复 ${sessionMerge.report.duplicates} 条，顺延 ${sessionMerge.report.shifted} 条，跳过 ${sessionMerge.report.skipped} 条；今日计划：新增 ${planMerge.report.added} 条，重复 ${planMerge.report.duplicates} 条，顺延 ${planMerge.report.shifted} 条，跳过 ${planMerge.report.skipped} 条；计划模板：新增 ${templateMerge.added} 个，重复 ${templateMerge.duplicates} 个；成绩记录：新增 ${examMerge.added} 条，重复 ${examMerge.duplicates} 条；复习项：新增 ${reviewMerge.added} 条，重复 ${reviewMerge.duplicates} 条。`,
     );
   }
 
@@ -1083,7 +1207,8 @@ export default function Dashboard() {
             onPlanDateChange={setPlanDate}
             updateState={updateState}
             onAddPlan={openNewPlan}
-            onRecord={openNewRecord}
+            onRecord={() => openNewRecord(planDate)}
+            onStartPlan={startPlanTimer}
             onEditPlan={openEditPlan}
             onEditSession={openEditRecord}
             onDeleteSession={deleteSession}
@@ -1096,6 +1221,8 @@ export default function Dashboard() {
             accountId={activeAccountId}
             sidebarHidden={sidebarHidden}
             onSidebarHiddenChange={setSidebarHidden}
+            launchRequest={timerLaunch}
+            onLaunchHandled={() => setTimerLaunch(null)}
             onSaveSessions={addTimerSessions}
             onExit={() => setView("overview")}
           />
@@ -1108,6 +1235,8 @@ export default function Dashboard() {
             onDelete={deleteSession}
           />
         )}
+        {view === "exams" && <ExamsView state={state} updateState={updateState} />}
+        {view === "reviews" && <ReviewView state={state} updateState={updateState} />}
         {view === "subjects" && <SubjectsView state={state} updateState={updateState} />}
         {view === "experiences" && <ExperiencesView state={state} updateState={updateState} />}
         {view === "weekly" && <WeeklyView state={state} metrics={weekMetrics} average={weeklyAverage} summary={weekSummary} />}
@@ -1129,6 +1258,7 @@ export default function Dashboard() {
             onAddAccount={addAccount}
             onRenameAccount={renameAccount}
             onDeleteAccount={deleteAccount}
+            lastSavedAt={lastSavedAt}
             onExport={() => setBackupMode("export")}
             onImport={() => importRef.current?.click()}
             onReset={() => window.confirm("确定恢复当前账号的初始信息？当前账号的现有记录将被清空。")
@@ -1142,8 +1272,8 @@ export default function Dashboard() {
         }} />
       </main>
 
-      {recordOpen && <RecordDialog state={state} initial={recordEditing} onClose={() => { setRecordOpen(false); setRecordEditing(null); }} onSave={addSession} />}
-      {planOpen && <PlanItemDialog state={state} initial={planEditing} onClose={() => { setPlanOpen(false); setPlanEditing(null); }} onSave={addPlanItem} />}
+      {recordOpen && <RecordDialog state={state} initial={recordEditing} draft={recordDraft} onClose={() => { setRecordOpen(false); setRecordEditing(null); setRecordDraft(null); }} onSave={addSession} />}
+      {planOpen && <PlanItemDialog state={state} date={planDate} initial={planEditing} onClose={() => { setPlanOpen(false); setPlanEditing(null); }} onSave={addPlanItem} />}
       {backupMode && (
         <BackupDialog
           mode={backupMode}
@@ -1153,6 +1283,7 @@ export default function Dashboard() {
           onConfirm={backupMode === "import" ? importData : exportData}
         />
       )}
+      {undoAction && <div className="undo-toast" role="status" aria-live="polite"><span>{undoAction.message}</span><button type="button" onClick={undoLastAction}><Undo2 size={16} />撤销</button><button type="button" className="undo-toast-close" onClick={dismissUndo} aria-label="关闭撤销提示"><X size={15} /></button></div>}
     </div>
   );
 }
@@ -1167,6 +1298,11 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   onRecord: () => void;
   onNavigate: (view: View) => void;
 }) {
+  const today = localDate();
+  const phasePaces = state.subjects.flatMap((subject) => subject.phases.map((phase) => ({ subject, phase, forecast: phaseForecast(phase, today) })))
+    .filter((item) => item.forecast.configured)
+    .sort((a, b) => a.forecast.progressDelta - b.forecast.progressDelta)
+    .slice(0, 4);
   return (
     <div className="page-stack">
       <section className="countdown-line"><CalendarDays size={19} /><span>距离暂定初试日期</span><strong>{days}</strong><span>天</span></section>
@@ -1215,6 +1351,13 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
         </article>
       </section>
 
+      <section className="panel overview-pace-panel">
+        <div className="panel-heading"><div><p className="card-kicker">阶段速度</p><h2>现在快了还是慢了？</h2></div><button className="text-button" onClick={() => onNavigate("subjects")}>设置阶段目标 <ChevronRight size={15} /></button></div>
+        {phasePaces.length ? <div className="overview-pace-grid">{phasePaces.map(({ subject, phase, forecast }) => <button type="button" key={phase.id} onClick={() => onNavigate("subjects")}><span className="subject-indicator" style={{ background: subject.accent }} /><div><small>{subject.shortName}</small><strong>{phase.name}</strong><span>当前 {phase.progress}% · 应达 {forecast.expectedProgress}%</span></div><div className={forecast.progressDelta < 0 ? "behind" : "ahead"}><strong>{forecast.progressDelta < 0 ? `落后 ${Math.abs(forecast.progressDelta)}% ≈ ${Math.abs(forecast.scheduleDays)} 天` : `领先 ${forecast.progressDelta}% ≈ ${Math.abs(forecast.scheduleDays)} 天`}</strong><span>预计完成 {forecast.estimatedCompletionDate ?? "等待进度历史"}</span></div></button>)}</div> : <div className="schedule-empty">为阶段填写开始日期、截止日期与目标进度后，这里会优先显示最需要关注的阶段。</div>}
+      </section>
+
+      <InputOutputPanel state={state} onNavigate={onNavigate} />
+
       <section className="subject-grid">
         {state.subjects.map((subject) => {
           const value = subjectProgress(subject);
@@ -1231,7 +1374,24 @@ function Overview({ state, todaySessions, metrics, progress, projectScore, days,
   );
 }
 
-function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
+function InputOutputPanel({ state, onNavigate }: { state: StudyState; onNavigate: (view: View) => void }) {
+  const latestExam = [...state.examRecords].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  if (!latestExam) return <section className="panel input-output-panel"><div className="panel-heading"><div><p className="card-kicker">投入 × 产出</p><h2>学习时长与成绩趋势</h2></div><button className="text-button" onClick={() => onNavigate("exams")}>记录第一套试卷 <ChevronRight size={15} /></button></div><div className="schedule-empty">记录真题或模考成绩后，这里会把对应科目的学习投入和正确率放在一起观察。</div></section>;
+  const subject = state.subjects.find((item) => item.id === latestExam.subjectId);
+  const dates = recentDates(14);
+  const inputValues = dates.map((date) => sessionsForDate(state.sessions, date).filter((session) => session.subjectId === latestExam.subjectId).reduce((sum, session) => sum + session.actualMinutes, 0));
+  const exams = state.examRecords.filter((record) => record.subjectId === latestExam.subjectId).sort((a, b) => a.date.localeCompare(b.date)).slice(-6);
+  const inputTotal = inputValues.slice(-7).reduce((sum, value) => sum + value, 0);
+  return <section className="panel input-output-panel"><div className="panel-heading"><div><p className="card-kicker">投入 × 产出 · {subject?.shortName ?? "科目"}</p><h2>学习时长与成绩趋势</h2></div><button className="text-button" onClick={() => onNavigate("exams")}>查看成绩模块 <ChevronRight size={15} /></button></div><div className="input-output-grid"><MiniTrend label="投入：近 7 天学习" value={`${(inputTotal / 60).toFixed(1)}h`} detail="曲线为近 14 天每日分钟数" values={inputValues} color="var(--accent)" /><MiniTrend label="产出：最近正确率" value={`${latestExam.correctRate}%`} detail={exams.map((exam) => `${exam.correctRate}%`).join(" → ")} values={exams.map((exam) => exam.correctRate)} color="var(--success)" /></div></section>;
+}
+
+function MiniTrend({ label, value, detail, values, color }: { label: string; value: string; detail: string; values: number[]; color: string }) {
+  const max = Math.max(1, ...values);
+  const points = values.map((item, index) => `${values.length === 1 ? 50 : index / (values.length - 1) * 100},${38 - item / max * 32}`).join(" ");
+  return <article className="mini-trend-card"><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="38" x2="100" y2="38" /><polyline points={points} style={{ stroke: color }} /></svg></article>;
+}
+
+function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onStartPlan, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
   state: StudyState;
   plan: DailyPlan;
   sessions: StudySession[];
@@ -1241,6 +1401,7 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   updateState: (updater: (current: StudyState) => StudyState) => void;
   onAddPlan: () => void;
   onRecord: () => void;
+  onStartPlan: (item: PlanItem) => void;
   onEditPlan: (item: PlanItem) => void;
   onEditSession: (session: StudySession) => void;
   onDeleteSession: (id: string) => void;
@@ -1249,6 +1410,8 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const selectedTemplate = state.planTemplates.find((template) => template.id === selectedTemplateId)
     ?? state.planTemplates[0];
+  const previousPlanDate = dateOffset(planDate, -1);
+  const previousPlan = state.plans.find((item) => item.date === previousPlanDate);
   const plannedMinutes = plan.items.reduce(
     (sum, item) => sum + minutesBetween(item.start, item.end, item.subjectId === "sleep"),
     0,
@@ -1270,6 +1433,12 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
     const template: PlanTemplate = { id: crypto.randomUUID(), name: name.trim(), items: clonePlanItems(plan.items) };
     updateState((current) => ({ ...current, planTemplates: [...current.planTemplates, template] }));
     setSelectedTemplateId(template.id);
+  }
+
+  function copyPreviousPlan() {
+    if (!previousPlan?.items.length) return;
+    if (plan.items.length && !window.confirm(`复制 ${previousPlanDate} 的计划会替换当前日期已有计划，是否继续？`)) return;
+    replaceTodayPlan(clonePlanItems(previousPlan.items));
   }
 
   function applyTemplate() {
@@ -1303,13 +1472,14 @@ function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange,
         <p className="muted">计划与实际记录按日期统一存储。</p>
         <div className="button-row compact-buttons">
           <button className="secondary-button" onClick={onRecord}><Clock3 size={16} />记录实际</button>
+          <button className="secondary-button" disabled={!previousPlan?.items.length} title={previousPlan?.items.length ? `复制 ${previousPlanDate} 的 ${previousPlan.items.length} 个时段` : `${previousPlanDate} 没有计划`} onClick={copyPreviousPlan}><Copy size={16} />复制前一天</button>
           <button className="secondary-button" disabled={!plan.items.length} onClick={saveAsTemplate}><Save size={16} />保存为模板</button>
         </div>
       </div>
       <section className="panel schedule-panel">
         <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>{plan.date === localDate() ? "今日" : "当日"}计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
         <DayScheduleChart entries={plan.items} state={state} mode="planned" />
-        {plan.items.length > 0 && <><div className="schedule-table-divider" /><EditablePlanTable items={plan.items} state={state} onEdit={onEditPlan} onDelete={onDeletePlan} /></>}
+        {plan.items.length > 0 && <><div className="schedule-table-divider" /><EditablePlanTable items={plan.items} sessions={state.sessions} state={state} canStart={planDate === localDate()} onStart={onStartPlan} onEdit={onEditPlan} onDelete={onDeletePlan} /></>}
       </section>
       <section className="panel template-panel">
         <div className="panel-heading"><div><p className="card-kicker">可复用安排</p><h2>计划模板预览</h2></div><span className="muted">{state.planTemplates.length} 个模板</span></div>
@@ -1339,23 +1509,56 @@ function RecordsView({ state, onRecord, onEdit, onDelete }: {
   onEdit: (session: StudySession) => void;
   onDelete: (id: string) => void;
 }) {
-  const dates = Array.from(new Set(state.sessions.map((item) => item.date))).sort().reverse();
+  const [query, setQuery] = useState("");
+  const [categoryId, setCategoryId] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredSessions = state.sessions.filter((session) => {
+    if (categoryId !== "all" && session.subjectId !== categoryId) return false;
+    if (fromDate && session.date < fromDate) return false;
+    if (toDate && session.date > toDate) return false;
+    if (!normalizedQuery) return true;
+    const subject = state.subjects.find((item) => item.id === session.subjectId);
+    const activity = lifeActivity(session.subjectId, state.lifeActivities);
+    return [session.task, session.note, session.date, subject?.name, subject?.shortName, activity?.name]
+      .filter(Boolean)
+      .some((value) => String(value).toLocaleLowerCase().includes(normalizedQuery));
+  });
+  const dates = Array.from(new Set(filteredSessions.map((item) => item.date))).sort().reverse();
+  const filteredMinutes = filteredSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
+  const hasFilters = Boolean(normalizedQuery || categoryId !== "all" || fromDate || toDate);
+
+  function clearFilters() {
+    setQuery("");
+    setCategoryId("all");
+    setFromDate("");
+    setToDate("");
+  }
+
   return (
     <div className="page-stack narrow-page">
       <div className="page-actions">
-        <p className="muted">共 {state.sessions.length} 条记录 · 与今日计划按日期统一存储</p>
+        <p className="muted">显示 {filteredSessions.length} / {state.sessions.length} 条 · 合计 {formatMinutes(filteredMinutes)}</p>
         <div className="button-row compact-buttons">
           <button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button>
         </div>
       </div>
+      <section className="records-filter-panel" aria-label="筛选时间记录">
+        <label className="records-search"><span>搜索任务、备注或类别</span><div><Search size={16} /><input type="search" value={query} placeholder="例如：电路、真题、复盘" onChange={(event) => setQuery(event.target.value)} /></div></label>
+        <label><span>科目 / 活动</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="all">全部类别</option><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
+        <label><span>开始日期</span><input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} /></label>
+        <label><span>结束日期</span><input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} /></label>
+        <button type="button" className="secondary-button records-clear" disabled={!hasFilters} onClick={clearFilters}><FilterX size={16} />清除筛选</button>
+      </section>
       {dates.length ? dates.map((date) => (
         <section className="panel" key={date}>
-          <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(state.sessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
-          <DayScheduleChart entries={sessionsForDate(state.sessions, date)} state={state} mode="actual" />
+          <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(filteredSessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
+          <DayScheduleChart entries={sessionsForDate(filteredSessions, date)} state={state} mode="actual" />
           <div className="schedule-table-divider" />
-            <EditableSessionTable sessions={sessionsForDate(state.sessions, date)} state={state} onEdit={onEdit} onDelete={onDelete} />
+            <EditableSessionTable sessions={sessionsForDate(filteredSessions, date)} state={state} onEdit={onEdit} onDelete={onDelete} />
         </section>
-      )) : <section className="panel"><EmptyState icon={Clock3} title="记录会按日期沉淀在这里" detail="完成第一条记录后，可在这里查看全部历史。" action="新增记录" onAction={onRecord} /></section>}
+      )) : <section className="panel">{state.sessions.length ? <EmptyState icon={Search} title="没有匹配的时间记录" detail="调整关键词、类别或日期范围后再试。" action="清除全部筛选" onAction={clearFilters} /> : <EmptyState icon={Clock3} title="记录会按日期沉淀在这里" detail="完成第一条记录后，可在这里查看全部历史。" action="新增记录" onAction={onRecord} />}</section>}
     </div>
   );
 }
@@ -1369,7 +1572,7 @@ function SubjectsView({ state, updateState }: { state: StudyState; updateState: 
 
   function addPhase(subject: Subject) {
     if (!window.confirm(`即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`)) return;
-    const phase = { id: crypto.randomUUID(), name: "新阶段", weight: 10, progress: 0, resources: [] };
+    const phase: Phase = { id: crypto.randomUUID(), name: "新阶段", weight: 10, progress: 0, startDate: today, targetDate: state.profile.examDate, targetProgress: 100, progressHistory: [{ date: today, progress: 0 }], resources: [] };
     updateState((current) => ({
       ...current,
       subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: [...item.phases, phase] } : item),
@@ -1422,13 +1625,20 @@ function SubjectsView({ state, updateState }: { state: StudyState; updateState: 
             <div className="phase-list">
               {subject.phases.map((phase) => {
                 const benchmark = benchmarkPhaseProgress(fastestExperience, subject.id, phase.id, today, state.profile.examDate);
+                const forecast = phaseForecast(phase, today);
+                const paceLabel = forecast.progressDelta < 0
+                  ? `落后 ${Math.abs(forecast.progressDelta)}% ≈ ${Math.abs(forecast.scheduleDays)} 天`
+                  : forecast.progressDelta > 0
+                    ? `领先 ${forecast.progressDelta}% ≈ ${Math.abs(forecast.scheduleDays)} 天`
+                    : "进度与计划一致";
                 return (
-                <div className="phase-row comparison-row" key={phase.id}>
+                <div className="phase-entry" key={phase.id}>
+                <div className="phase-row comparison-row">
                   <button className="phase-open" onClick={() => setEditing({ subjectId: subject.id, phaseId: phase.id })}><span>{phase.name}</span><small>阶段权重 {phase.weight}% · {phase.resources.length} 项资料</small></button>
                   <div className="comparison-slider">
                     <input aria-label={`${subject.name}${phase.name}我的进度`} type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
                       const value = Number(event.target.value);
-                      updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? { ...p, progress: value } : p) } : item) }));
+                      updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? recordPhaseProgress(p, value, today) : p) } : item) }));
                     }} style={{
                       "--range-color": subject.accent,
                       "--range-progress": `${Math.min(100, Math.max(0, phase.progress))}%`,
@@ -1437,6 +1647,8 @@ function SubjectsView({ state, updateState }: { state: StudyState; updateState: 
                     <div className="comparison-legend"><span style={{ color: subject.accent }}>我的 {phase.progress}%</span><span>快线 {benchmark ?? "—"}%</span></div>
                   </div>
                   <strong className={benchmark !== null && phase.progress < benchmark ? "behind" : "ahead"}>{benchmark === null ? "—" : `${phase.progress - benchmark >= 0 ? "+" : ""}${phase.progress - benchmark}`}</strong>
+                </div>
+                {forecast.configured && <div className="phase-pace-strip"><div><span>当前</span><strong>{phase.progress}%</strong></div><div><span>按计划应达</span><strong>{forecast.expectedProgress}%</strong></div><div className={forecast.progressDelta < 0 ? "behind" : "ahead"}><span>进度速度</span><strong>{paceLabel}</strong></div><div><span>按近 14 天速度预计</span><strong>{forecast.estimatedCompletionDate ?? "暂无足够历史"}</strong><small>{forecast.recentDailySpeed === null ? "至少跨两天记录进度" : `${forecast.recentDailySpeed.toFixed(1)}% / 天`}</small></div></div>}
                 </div>
               )})}
             </div>
@@ -1461,12 +1673,17 @@ function PhaseEditorDialog({ state, subjectId, phaseId, updateState, onClose }: 
   if (!subject || !phase) return null;
   const activeSubject = subject;
   const activePhase = phase;
+  const forecast = phaseForecast(activePhase, localDate());
 
   function updatePhase(changes: Partial<Subject["phases"][number]>) {
     updateState((current) => ({
       ...current,
       subjects: current.subjects.map((item) => item.id === subjectId
-        ? { ...item, phases: item.phases.map((entry) => entry.id === phaseId ? { ...entry, ...changes } : entry) }
+        ? { ...item, phases: item.phases.map((entry) => {
+            if (entry.id !== phaseId) return entry;
+            const next = { ...entry, ...changes };
+            return typeof changes.progress === "number" ? recordPhaseProgress(next, changes.progress, localDate()) : next;
+          }) }
         : item),
     }));
   }
@@ -1503,6 +1720,12 @@ function PhaseEditorDialog({ state, subjectId, phaseId, updateState, onClose }: 
           <label><span>阶段名称</span><input value={phase.name} onChange={(event) => updatePhase({ name: event.target.value })} /></label>
           <label><span>阶段权重</span><input type="number" min="0" max="100" value={phase.weight} onChange={(event) => updatePhase({ weight: Math.max(0, Number(event.target.value)) })} /></label>
           <label><span>当前进度：{phase.progress}%</span><input type="range" min="0" max="100" value={phase.progress} onChange={(event) => updatePhase({ progress: Number(event.target.value) })} /></label>
+        </div>
+        <div className="phase-schedule-fields">
+          <label><span>阶段开始日期</span><input type="date" value={phase.startDate ?? ""} max={phase.targetDate || undefined} onChange={(event) => updatePhase({ startDate: event.target.value || undefined })} /></label>
+          <label><span>目标截止日期</span><input type="date" value={phase.targetDate ?? ""} min={phase.startDate || undefined} onChange={(event) => updatePhase({ targetDate: event.target.value || undefined })} /></label>
+          <label><span>截止时目标进度</span><div className="target-progress-input"><input type="number" min="1" max="100" value={phase.targetProgress ?? 100} onChange={(event) => updatePhase({ targetProgress: Math.min(100, Math.max(1, Number(event.target.value) || 100)) })} /><span>%</span></div></label>
+          <div className={`phase-schedule-preview ${forecast.configured && forecast.progressDelta < 0 ? "behind" : ""}`}><span>今日节奏判断</span><strong>{forecast.configured ? `应达 ${forecast.expectedProgress}% · ${forecast.progressDelta >= 0 ? "领先" : "落后"} ${Math.abs(forecast.progressDelta)}%` : "填写开始与截止日期后计算"}</strong></div>
         </div>
         <div className="resource-heading"><div><p className="card-kicker">完成清单</p><h3>书本、章节、试卷与习题集</h3></div><span className="muted">完成勾选会自动同步阶段进度</span></div>
         <form className="resource-add-form" onSubmit={addResource}>
@@ -1567,6 +1790,7 @@ function WeeklyView({ state, metrics, average, summary }: { state: StudyState; m
           ))}
         </div>
       </section>
+      <WeeklyInsights state={state} from={metrics[0]?.date ?? localDate()} to={metrics.at(-1)?.date ?? localDate()} />
       <section className="panel scoring-guide">
         <div className="panel-heading"><div><p className="card-kicker">实时计算</p><h2>本周规则计分</h2></div><span className="score-badge">{summary.periodScore}</span></div>
         <div className="guide-grid">{summary.ruleResults.map((rule) => <ScoreGuide key={rule.id} number={String(Math.round(rule.points))} title={`${rule.name} · 权重 ${rule.weight}`} detail={`${rule.description}；本周达成 ${Math.round(rule.ratio * 100)}%`} />)}</div>
@@ -1710,6 +1934,7 @@ function SettingsView({
   onAddAccount,
   onRenameAccount,
   onDeleteAccount,
+  lastSavedAt,
   onExport,
   onImport,
   onReset,
@@ -1722,6 +1947,7 @@ function SettingsView({
   onAddAccount: (name: string) => boolean;
   onRenameAccount: (accountId: string, name: string) => boolean;
   onDeleteAccount: (accountId: string) => void;
+  lastSavedAt: string;
   onExport: () => void;
   onImport: () => void;
   onReset: () => void;
@@ -1729,6 +1955,11 @@ function SettingsView({
   const [customMode, setCustomMode] = useState<"light" | "dark">("light");
   const [newAccountName, setNewAccountName] = useState("");
   const [accountNames, setAccountNames] = useState<Record<string, string>>({});
+  const backupTimestamp = state.dataSafety.lastExternalBackupAt;
+  const backupAgeDays = backupTimestamp ? Math.floor((Date.now() - new Date(backupTimestamp).getTime()) / 86_400_000) : null;
+  const backupNeedsAttention = backupAgeDays === null || backupAgeDays >= 7;
+  const dataVolume = state.sessions.length + state.plans.reduce((sum, plan) => sum + plan.items.length, 0) + state.examRecords.length + state.reviewItems.length;
+  const stateSizeKb = Math.max(1, Math.round(new Blob([JSON.stringify(state)]).size / 1024));
   useEffect(() => {
     setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name])));
   }, [accounts]);
@@ -1922,10 +2153,17 @@ function SettingsView({
           <div className="button-row"><button className="secondary-button" onClick={() => updateState((current) => ({ ...current, appearance: { ...defaultStudyState.appearance, paletteId: "custom" } }))}><RotateCcw size={16} />重置自定义配色</button></div>
         </div>}
       </section>
-      <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">数据管理</p><h2>本机存储与备份</h2></div><HardDrive size={19} /></div>
-        <p className="settings-copy">学习记录只保存在当前浏览器，不会上传到服务器。更换设备、浏览器或清除网站数据前，请先导出 JSON；建议每周备份一次。</p>
-        <div className="button-row"><button className="secondary-button" onClick={onExport}><Download size={17} />导出 JSON</button><button className="secondary-button" onClick={onImport}><FileUp size={17} />导入备份</button><button className="danger-button" onClick={onReset}><RotateCcw size={17} />恢复初始数据</button></div>
+      <section className="panel settings-card data-safety-card">
+        <div className="panel-heading"><div><p className="card-kicker">数据安全中心</p><h2>本机存储与外部备份</h2></div><HardDrive size={19} /></div>
+        <p className="settings-copy">自动保存只保护当前浏览器里的副本；JSON 下载才是可迁移、可恢复的外部备份。</p>
+        <div className="data-safety-grid">
+          <article className="positive"><span>最近自动保存</span><strong>{lastSavedAt ? (Date.now() - new Date(lastSavedAt).getTime() < 60_000 ? "刚刚" : new Date(lastSavedAt).toLocaleString("zh-CN")) : "正在读取"}</strong><small>当前账号 · 浏览器本机</small></article>
+          <article className={backupNeedsAttention ? "negative" : "positive"}><span>最近外部备份</span><strong>{backupTimestamp ? (backupAgeDays === 0 ? "今天" : `${backupAgeDays} 天前`) : "从未备份"}</strong><small>{backupTimestamp ? new Date(backupTimestamp).toLocaleString("zh-CN") : "请立即导出一个 JSON 文件"}</small></article>
+          <article><span>数据条目</span><strong>{dataVolume}</strong><small>时间、计划、成绩与复习项</small></article>
+          <article><span>本机数据量</span><strong>{stateSizeKb} KB</strong><small>{state.subjects.length} 科目 · {state.experiences.length} 篇经验</small></article>
+        </div>
+        {backupNeedsAttention && <div className="backup-warning"><AlertTriangle size={18} /><div><strong>{backupAgeDays === null ? "还没有外部备份" : `外部备份已经 ${backupAgeDays} 天未更新`}</strong><span>清除浏览器数据、更换设备或浏览器故障都可能导致本机副本丢失。</span></div></div>}
+        <div className="button-row"><button className="primary-button" onClick={onExport}><Download size={17} />立即备份</button><button className="secondary-button" onClick={onImport}><FileUp size={17} />导入备份</button><button className="danger-button" onClick={onReset}><RotateCcw size={17} />恢复初始数据</button></div>
       </section>
     </div>
   );
@@ -1995,7 +2233,7 @@ function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
   );
 }
 
-function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; initial: StudySession | null; onClose: () => void; onSave: (session: StudySession) => void }) {
+function RecordDialog({ state, initial, draft, onClose, onSave }: { state: StudyState; initial: StudySession | null; draft: RecordDraft | null; onClose: () => void; onSave: (session: StudySession) => void }) {
   const now = new Date();
   const end = `${String(now.getHours()).padStart(2, "0")}:${String(Math.floor(now.getMinutes() / 5) * 5).padStart(2, "0")}`;
   const startDate = new Date(now.getTime() - 90 * 60_000);
@@ -2009,7 +2247,7 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
     completion: initial.completion,
     focus: initial.focus,
     note: initial.note,
-  } : { date: localDate(), start, end, subjectId: "math", task: "", completion: 100, focus: 4, note: "" });
+  } : { date: draft?.date ?? localDate(), start: draft?.start ?? start, end: draft?.end ?? end, subjectId: draft?.subjectId ?? "math", task: draft?.task ?? "", completion: 100, focus: 4, note: draft?.note ?? "" });
   const selectedActivity = lifeActivity(form.subjectId, state.lifeActivities);
   const isLifeActivity = Boolean(selectedActivity);
   const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
@@ -2027,7 +2265,7 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>{initial ? "编辑时间记录" : "记录一个时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>{initial ? "编辑时间记录" : draft?.task ? "记录计划完成情况" : "记录一个时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>日期</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
           <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
@@ -2044,7 +2282,7 @@ function RecordDialog({ state, initial, onClose, onSave }: { state: StudyState; 
   );
 }
 
-function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState; initial: PlanItem | null; onClose: () => void; onSave: (item: PlanItem) => void }) {
+function PlanItemDialog({ state, date, initial, onClose, onSave }: { state: StudyState; date: string; initial: PlanItem | null; onClose: () => void; onSave: (item: PlanItem) => void }) {
   const [form, setForm] = useState(() => initial ? {
     start: initial.start,
     end: initial.end,
@@ -2053,15 +2291,19 @@ function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState
     note: initial.note,
   } : { start: "08:00", end: "10:00", subjectId: state.subjects[0]?.id ?? "math", task: "", note: "" });
   const duration = minutesBetween(form.start, form.end, form.subjectId === "sleep");
+  const range = scheduledTimeRange(date, form.start, form.end, form.subjectId === "sleep");
+  const conflicts = range
+    ? findOverlappingPlanItems(range, state.plans, initial ? new Set([initial.id]) : new Set())
+    : [];
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!form.task.trim() || duration <= 0) return;
+    if (!form.task.trim() || !range || conflicts.length) return;
     onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, task: form.task.trim() });
   }
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">今日计划</p><h2>{initial ? "编辑计划时段" : "安排一个计划时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+        <div className="dialog-heading"><div><p className="card-kicker">{date} · 计划</p><h2>{initial ? "编辑计划时段" : "安排一个计划时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
         <div className="dialog-grid">
           <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
           <label><span>计划任务</span><input autoFocus value={form.task} placeholder="例如：高数基础讲义第 3 章" onChange={(event) => setForm({ ...form, task: event.target.value })} /></label>
@@ -2069,7 +2311,8 @@ function PlanItemDialog({ state, initial, onClose, onSave }: { state: StudyState
           <label><span>结束时间</span><input type="time" value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label>
           <label className="wide"><span>计划备注（可选）</span><textarea value={form.note} placeholder="目标章节、题量或完成标准" onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
         </div>
-        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || duration <= 0}><Save size={16} />{initial ? "保存修改" : "保存计划"}</button></div></div>
+        {conflicts.length > 0 && <div className="form-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>与已有计划时段重叠</strong>{conflicts.map(({ date: conflictDate, item }) => <span key={item.id}>{conflictDate} {item.start}–{item.end} · {item.task}</span>)}<small>请调整起止时间；首尾相接的时段可以正常保存。</small></div></div>}
+        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || !range || conflicts.length > 0}><Save size={16} />{initial ? "保存修改" : "保存计划"}</button></div></div>
       </form>
     </div>
   );
@@ -2097,15 +2340,27 @@ function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions:
   })}</div>;
 }
 
-function EditablePlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
+function EditablePlanTable({ items, sessions, state, canStart, onStart, onEdit, onDelete }: { items: PlanItem[]; sessions: StudySession[]; state: StudyState; canStart: boolean; onStart: (item: PlanItem) => void; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
   return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => {
     const subject = state.subjects.find((entry) => entry.id === item.subjectId);
     const activity = lifeActivity(item.subjectId, state.lifeActivities);
-    return <div className="plan-list-row" key={item.id}>
+    const linkedSessions = sessions.filter((session) => session.planItemId === item.id);
+    const plannedMinutes = minutesBetween(item.start, item.end, item.subjectId === "sleep");
+    const actualMinutes = linkedSessions.reduce((sum, session) => sum + session.actualMinutes, 0);
+    const completion = actualMinutes > 0
+      ? Math.round(linkedSessions.reduce((sum, session) => sum + session.completion * session.actualMinutes, 0) / actualMinutes)
+      : 0;
+    const variance = actualMinutes - plannedMinutes;
+    const varianceLabel = variance > 0 ? `超时 +${variance} min` : variance < 0 ? `提前 ${Math.abs(variance)} min` : "与计划一致";
+    return <div className="plan-list-row execution-plan-row" key={item.id}>
       <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
       <time>{item.start}–{item.end}</time>
       <div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div>
+      <div className={`plan-execution-summary ${linkedSessions.length ? "has-records" : ""}`}>
+        {linkedSessions.length ? <><strong>计划 {plannedMinutes} min → 实际 {actualMinutes} min</strong><span>完成度 {completion}% · {varianceLabel} · 已关联 {linkedSessions.length} 段</span></> : <><strong>计划 {plannedMinutes} min</strong><span>尚未开始执行</span></>}
+      </div>
       <span className="row-actions">
+        <button type="button" className="start-plan-button" disabled={!canStart} onClick={() => onStart(item)} aria-label={`开始此任务：${item.task}`} title={canStart ? "进入计时器并自动关联计划" : "只能从今天的计划开始计时"}><Play size={14} fill="currentColor" />{linkedSessions.length ? "继续计时" : "开始此任务"}</button>
         <button type="button" onClick={() => onEdit(item)} aria-label="编辑计划"><Pencil size={15} /></button>
         <button type="button" onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button>
       </span>

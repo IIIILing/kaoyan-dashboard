@@ -1,11 +1,15 @@
 import type {
   DailyPlan,
+  ExamRecord,
   PlanItem,
   PlanTemplate,
+  ReviewItem,
   ScheduleDay,
   StudySession,
   StudyState,
 } from "./study-state";
+import { normalizeExamRecords } from "./exam-data";
+import { normalizeReviewItems } from "./review-data";
 
 export type DateRange = { from: string; to: string };
 
@@ -20,6 +24,8 @@ export type ScheduleImportCandidate = {
   sessions: StudySession[];
   plans: DailyPlan[];
   planTemplates: PlanTemplate[];
+  examRecords: ExamRecord[];
+  reviewItems: ReviewItem[];
   source: "schedule" | "state" | "plan-archive" | "daily-plan";
 };
 
@@ -38,6 +44,8 @@ export type ScheduleArchive = {
   schedule: ScheduleDay[];
   days: ScheduleDay[];
   planTemplates: PlanTemplate[];
+  examRecords: ExamRecord[];
+  reviewItems: ReviewItem[];
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -118,6 +126,7 @@ function normalizeSession(value: unknown, fallbackDate = ""): StudySession | nul
   if (duration <= 0) return null;
   return {
     id: text(value.id) || legacyId("legacy-session", [date, start, end, subjectId, task, text(value.note)]),
+    planItemId: text(value.planItemId) || undefined,
     date,
     start,
     end,
@@ -201,7 +210,7 @@ export function buildScheduleDays(sessions: StudySession[], plans: DailyPlan[]):
 export function withUnifiedSchedule(state: StudyState): StudyState {
   return {
     ...state,
-    version: 2,
+    version: 3,
     schedule: buildScheduleDays(state.sessions, state.plans),
   };
 }
@@ -209,6 +218,7 @@ export function withUnifiedSchedule(state: StudyState): StudyState {
 export function createScheduleArchive(state: StudyState, range: DateRange): ScheduleArchive {
   const sessions = state.sessions.filter((item) => item.date >= range.from && item.date <= range.to);
   const plans = state.plans.filter((item) => item.date >= range.from && item.date <= range.to);
+  const examRecords = state.examRecords.filter((item) => item.date >= range.from && item.date <= range.to);
   const days = buildScheduleDays(sessions, plans);
   return {
     kind: "kaoyan-schedule-archive",
@@ -225,6 +235,8 @@ export function createScheduleArchive(state: StudyState, range: DateRange): Sche
     schedule: days,
     days,
     planTemplates: state.planTemplates,
+    examRecords,
+    reviewItems: state.reviewItems,
   };
 }
 
@@ -250,7 +262,7 @@ export function parseScheduleImport(value: unknown): ScheduleImportCandidate | n
       : [];
 
   let source: ScheduleImportCandidate["source"] = "state";
-  const recognizedState = Array.isArray(value.sessions) && (Array.isArray(value.subjects) || value.version === 1 || value.version === 2);
+  const recognizedState = Array.isArray(value.sessions) && (Array.isArray(value.subjects) || value.version === 1 || value.version === 2 || value.version === 3);
   if (kind === "kaoyan-schedule-archive") {
     source = "schedule";
   } else if (kind === "kaoyan-plan-archive" || (!Array.isArray(value.sessions) && Array.isArray(value.plans))) {
@@ -267,7 +279,9 @@ export function parseScheduleImport(value: unknown): ScheduleImportCandidate | n
   const planTemplates = Array.isArray(value.planTemplates)
     ? value.planTemplates.map(normalizeTemplate).filter((item): item is PlanTemplate => Boolean(item))
     : [];
-  return { sessions, plans: collapsePlans(plans), planTemplates, source };
+  const examRecords = normalizeExamRecords(value.examRecords);
+  const reviewItems = normalizeReviewItems(value.reviewItems);
+  return { sessions, plans: collapsePlans(plans), planTemplates, examRecords, reviewItems, source };
 }
 
 function itemsOverlap(a: Pick<PlanItem, "start" | "end">, b: Pick<PlanItem, "start" | "end">) {
