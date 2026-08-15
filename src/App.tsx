@@ -13,6 +13,7 @@ import {
   NotebookText,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
   Settings,
   SlidersHorizontal,
   Sun,
@@ -251,6 +252,7 @@ export default function Dashboard() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [saveError, setSaveError] = useState(false);
+  const [storageConflict, setStorageConflict] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordEditing, setRecordEditing] = useState<StudySession | null>(null);
@@ -402,6 +404,23 @@ export default function Dashboard() {
       window.removeEventListener("beforeunload", flushPendingSave);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
+  }, []);
+
+  // 多标签页互踩防护:其他标签页修改了账号数据(或注册表/旧数据)时,
+  // 提示刷新后再操作,避免本页的防抖写回覆盖掉另一页的最新修改。
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (!event.key) return;
+      if (
+        event.key === ACCOUNT_REGISTRY_KEY ||
+        event.key === LEGACY_LOCAL_KEY ||
+        event.key.startsWith(ACCOUNT_STATE_PREFIX)
+      ) {
+        setStorageConflict(true);
+      }
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   useEffect(() => {
@@ -914,6 +933,17 @@ export default function Dashboard() {
               <span>请立即导出 JSON 备份;也可以在「设置 → 侧栏图标」或计时器背景图中移除较大的图片来释放空间。</span>
             </div>
             <button type="button" className="primary-button" onClick={() => setBackupMode("export")}><Download size={15} />导出备份</button>
+          </div>
+        )}
+
+        {storageConflict && (
+          <div className="backup-reminder-banner" role="status">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>检测到其他标签页修改了数据</strong>
+              <span>为避免互相覆盖,请刷新页面加载最新数据后再继续操作。</span>
+            </div>
+            <button type="button" className="primary-button" onClick={() => window.location.reload()}><RotateCcw size={15} />刷新页面</button>
           </div>
         )}
 

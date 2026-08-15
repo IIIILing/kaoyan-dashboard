@@ -2,6 +2,7 @@ import { AlertCircle, BookOpen, CalendarClock, Check, Pencil, Plus, Trash2, X } 
 import { useMemo, useState } from "react";
 import { confirmDialog } from "./components/dialogs";
 import { completeReviewItem, nextReviewInterval } from "./review-data";
+import { localDate } from "./lib/dates";
 import type { ReviewItem, ReviewItemKind, StudyState } from "./study-state";
 
 const KIND_OPTIONS: { value: ReviewItemKind; label: string }[] = [
@@ -9,11 +10,6 @@ const KIND_OPTIONS: { value: ReviewItemKind; label: string }[] = [
   { value: "knowledge", label: "知识点" },
   { value: "exam", label: "试卷复盘" },
 ];
-
-function localDate() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
 
 function dateDistance(date: string) {
   return Math.round((new Date(`${date}T12:00:00`).getTime() - new Date(`${localDate()}T12:00:00`).getTime()) / 86_400_000);

@@ -19,7 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { confirmDialog } from "./components/dialogs";
+import { alertDialog, confirmDialog } from "./components/dialogs";
+import { compressImageFile } from "./lib/image";
 import type { StudySession, StudyState } from "./study-state";
 import { findOverlappingSessions } from "./session-time";
 
@@ -501,7 +502,10 @@ function BackgroundDialog({ effectLabel, value, onSave, onClose }: { effectLabel
   const [draft, setDraft] = useState<BackgroundSettings>({ ...value });
   function upload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
-    const reader = new FileReader(); reader.onload = () => setDraft((current) => ({ ...current, mode: "image", image: String(reader.result) })); reader.readAsDataURL(file);
+    // 压缩到最长边 1280px 再存,避免大图 base64 撑爆 localStorage 配额。
+    compressImageFile(file, 1280)
+      .then((dataUrl) => setDraft((current) => ({ ...current, mode: "image", image: dataUrl })))
+      .catch(() => void alertDialog({ title: "图片处理失败", message: "无法读取这张图片，请换一张再试。" }));
   }
   return <DialogShell title={`设置“${effectLabel}”背景`} kicker="背景" onClose={onClose} footer={<><button type="button" className="secondary-button" onClick={() => setDraft({ ...AUTO_BACKGROUND })}>恢复默认</button><button type="button" className="primary-button" onClick={() => { onSave(draft); onClose(); }}>应用背景</button></>}><div className="background-mode-list">{(["auto","color","gradient","image"] as BackgroundMode[]).map((mode) => <button type="button" key={mode} className={draft.mode === mode ? "active" : ""} onClick={() => setDraft({ ...draft, mode })}>{mode === "auto" ? "跟随效果 / 黑白主题" : mode === "color" ? "纯色" : mode === "gradient" ? "渐变" : "图片"}</button>)}</div>{draft.mode === "color" && <label className="background-color-field"><span>背景颜色</span><input type="color" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></label>}{draft.mode === "gradient" && <div className="background-color-grid"><label><span>起始颜色</span><input type="color" value={draft.color} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></label><label><span>结束颜色</span><input type="color" value={draft.secondColor} onChange={(event) => setDraft({ ...draft, secondColor: event.target.value })} /></label></div>}{draft.mode === "image" && <div className="background-upload"><label className="secondary-button"><ImageIcon size={16} />选择本地图片<input hidden type="file" accept="image/*" onChange={upload} /></label>{draft.image && <div style={{ backgroundImage: `url(${JSON.stringify(draft.image)})` }} />}</div>}<p className="focus-dialog-note">内置效果在“跟随效果”时会自动适配亮色和暗色主题；自定义背景按你的设置原样显示。</p></DialogShell>;
 }

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { DashboardAccount } from "../lib/accounts";
 import { alertDialog, confirmDialog } from "../components/dialogs";
+import { compressImageFile } from "../lib/image";
 import { COLOR_FIELDS, THEME_PALETTES } from "../theme-palettes";
 import {
   defaultStudyState,
@@ -137,9 +138,10 @@ export default function SettingsView({
       void alertDialog({ title: "无法上传图标", message: "图标图片不能超过 2 MB。" });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => updateProfile("sidebarIcon", String(reader.result));
-    reader.readAsDataURL(file);
+    // 压缩到最长边 128px 再存 localStorage,避免大图 base64 撑爆 5MB 配额。
+    compressImageFile(file, 128)
+      .then((dataUrl) => updateProfile("sidebarIcon", dataUrl))
+      .catch(() => void alertDialog({ title: "无法上传图标", message: "图片处理失败，请换一张图片再试。" }));
   }
   return (
     <div className="page-stack settings-page">

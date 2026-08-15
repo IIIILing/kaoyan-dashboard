@@ -1,13 +1,9 @@
 import { Check, Copy, Route } from "lucide-react";
 import { useMemo, useState } from "react";
 import { benchmarkPhaseProgress, benchmarkProjectProgress, benchmarkSubjectProgress, type ExperienceMilestone, type ExperiencePost } from "./experience-data";
+import { localDate } from "./lib/dates";
 import { mergeImportedPlans } from "./schedule-data";
 import { projectProgress, subjectProgress, type DailyPlan, type StudyState } from "./study-state";
-
-function localDate() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
 
 function milestoneDate(monthDay: string, examDate: string) {
   if (!/^\d{2}-\d{2}$/.test(monthDay) || !/^\d{4}-\d{2}-\d{2}$/.test(examDate)) return null;

@@ -6,6 +6,7 @@ import {
   type StudySession,
   type WeeklyRuleMetric,
 } from "../study-state";
+import { timeToMinutes } from "./format";
 
 export function clampRatio(value: number) {
   return Math.min(1, Math.max(0, value));
@@ -60,11 +61,6 @@ function sessionMinutesMatching(session: StudySession, matches: (minute: number)
     if (matches((start + offset) % (24 * 60))) total += 1;
   }
   return total;
-}
-
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  return hours * 60 + minutes;
 }
 
 export function dailyMetrics(

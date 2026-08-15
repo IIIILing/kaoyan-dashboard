@@ -6,7 +6,9 @@
 
 > **📌 后续小修(2025-07,commit `d7283fb`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署;移动端验收通过。
 
-> **📌 数据可靠性加固(2025-07,commit 待填)**:① 防抖保存加 try/catch,写入失败时顶栏显示"保存失败"并出现"存储空间不足"预警横幅(含导出备份入口);② 新增评分引擎单测 `src/__tests__/scoring.test.ts`(12 个断言,覆盖权重曲线、dailyMetrics、periodSummary),测试总数 59 → 71。
+> **📌 数据可靠性加固(2025-07,commit `eab5840`)**:① 防抖保存加 try/catch,写入失败时顶栏显示"保存失败"并出现"存储空间不足"预警横幅(含导出备份入口);② 新增评分引擎单测 `src/__tests__/scoring.test.ts`(12 个断言,覆盖权重曲线、dailyMetrics、periodSummary),测试总数 59 → 71。
+
+> **📌 体验与健壮性(2025-07,commit 待填)**:① 新增 `src/lib/image.ts` 图片压缩(侧栏图标压到 128px、计时器背景图压到 1280px,PNG 保透明、SVG 原样),避免 base64 撑爆配额;② 收敛重复工具函数(`localDate` 从 ExamsView/ReviewView/ExperienceBenchmarkPanel/review-data 删除副本,`timeToMinutes/minutesToTime/minutesBetween` 从 weekly-insights/schedule-data/lib-scoring 删除副本,统一走 `src/lib/format.ts` 与 `src/lib/dates.ts`);③ 多标签页互踩防护:监听 `storage` 事件,其他标签页改动数据时提示刷新;④ `GenericDialog` 增加焦点圈定(Tab 循环 + 关闭还原焦点)。
 
 ---
 
