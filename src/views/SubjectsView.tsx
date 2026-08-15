@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Download, FileUp, Plus } from "lucide-react";
-import { PhaseEditorDialog } from "../components/dialogs";
+import { PhaseEditorDialog, alertDialog, confirmDialog } from "../components/dialogs";
 import { ProgressRing } from "../components/ui";
 import { benchmarkPhaseProgress, benchmarkProjectProgress, benchmarkSubjectProgress } from "../experience-data";
 import { localDate } from "../lib/dates";
@@ -15,8 +15,12 @@ export default function SubjectsView({ state, updateState }: { state: StudyState
   const fastestExperience = state.experiences.find((item) => item.id === state.fastestExperienceId);
   const fastestProjectProgress = benchmarkProjectProgress(fastestExperience, state.subjects, today, state.profile.examDate);
 
-  function addPhase(subject: Subject) {
-    if (!window.confirm(`即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`)) return;
+  async function addPhase(subject: Subject) {
+    if (!await confirmDialog({
+      title: "新增复习阶段",
+      message: `即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`,
+      confirmLabel: "继续",
+    })) return;
     const phase: Phase = { id: crypto.randomUUID(), name: "新阶段", weight: 10, progress: 0, startDate: today, targetDate: state.profile.examDate, targetProgress: 100, progressHistory: [{ date: today, progress: 0 }], resources: [] };
     updateState((current) => ({
       ...current,
@@ -31,11 +35,16 @@ export default function SubjectsView({ state, updateState }: { state: StudyState
 
   function importSubjects(file: File) {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result)) as { subjects?: Subject[] };
         if (!Array.isArray(parsed.subjects) || !parsed.subjects.every((subject) => subject.id && subject.name && Array.isArray(subject.phases))) throw new Error("invalid");
-        if (!window.confirm("导入会替换当前全部科目、阶段和资料进度，时间记录仍会保留。是否继续？")) return;
+        if (!await confirmDialog({
+          title: "替换科目配置",
+          message: "导入会替换当前全部科目、阶段和资料进度，时间记录仍会保留。是否继续？",
+          confirmLabel: "替换",
+          danger: true,
+        })) return;
         updateState((current) => ({
           ...current,
           subjects: parsed.subjects!.map((subject) => ({
@@ -44,7 +53,7 @@ export default function SubjectsView({ state, updateState }: { state: StudyState
           })),
         }));
       } catch {
-        window.alert("无法导入：请选择由科目进度页面导出的 JSON 文件。");
+        void alertDialog({ title: "无法导入", message: "请选择由科目进度页面导出的 JSON 文件。" });
       }
     };
     reader.readAsText(file);

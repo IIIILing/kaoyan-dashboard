@@ -1,5 +1,6 @@
 import { AlertCircle, BookOpen, CalendarClock, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { confirmDialog } from "./components/dialogs";
 import { completeReviewItem, nextReviewInterval } from "./review-data";
 import type { ReviewItem, ReviewItemKind, StudyState } from "./study-state";
 
@@ -70,7 +71,16 @@ export default function ReviewView({ state, updateState }: { state: StudyState; 
           <div className="review-actions">
             {distance <= 0 && <button className="primary-button" onClick={() => complete(item)}><Check size={15} />完成复习 · 下次 +{nextReviewInterval(item)} 天</button>}
             <button className="icon-button" onClick={() => { setEditing(item); setDialogOpen(true); }} aria-label={`编辑${item.title}`}><Pencil size={16} /></button>
-            <button className="icon-button danger" onClick={() => window.confirm(`确定删除复习项“${item.title}”？`) && updateState((current) => ({ ...current, reviewItems: current.reviewItems.filter((entry) => entry.id !== item.id) }))} aria-label={`删除${item.title}`}><Trash2 size={16} /></button>
+            <button className="icon-button danger" onClick={async () => {
+              if (await confirmDialog({
+                title: "删除复习项",
+                message: `确定删除复习项“${item.title}”？`,
+                danger: true,
+                confirmLabel: "删除",
+              })) {
+                updateState((current) => ({ ...current, reviewItems: current.reviewItems.filter((entry) => entry.id !== item.id) }));
+              }
+            }} aria-label={`删除${item.title}`}><Trash2 size={16} /></button>
           </div>
         </article>;
       })}</div> : <div className="schedule-empty">{filter === "due" ? <><Check size={18} />今天没有待复习项，队列已经清空。</> : <><BookOpen size={18} />还没有符合条件的复习项。</>}</div>}

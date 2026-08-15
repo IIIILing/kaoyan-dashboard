@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -28,6 +28,148 @@ const RESOURCE_TYPES = [
   { value: "exercise", label: "习题集" },
   { value: "other", label: "其他" },
 ] as const;
+
+// ---- 通用对话框服务(Promise API)----
+// alertDialog / confirmDialog / promptDialog 返回 Promise,可取代 window.alert / confirm / prompt。
+// 调用方任意位置调用即可;App.tsx 中挂载一次 <DialogHost /> 负责渲染,队列按顺序逐条弹出。
+type DialogKind = "alert" | "confirm" | "prompt";
+
+type DialogRequest = {
+  id: number;
+  kind: DialogKind;
+  title: string;
+  message?: React.ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  defaultValue?: string;
+  placeholder?: string;
+  resolve: (value: boolean | string | null) => void;
+};
+
+type DialogOptions = {
+  title: string;
+  message?: React.ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  defaultValue?: string;
+  placeholder?: string;
+};
+
+let dialogQueue: DialogRequest[] = [];
+const dialogListeners = new Set<() => void>();
+let nextDialogId = 1;
+
+function notifyDialogListeners() {
+  dialogListeners.forEach((listener) => listener());
+}
+
+function enqueueDialog(options: DialogOptions, kind: DialogKind, resolve: DialogRequest["resolve"]) {
+  dialogQueue = [...dialogQueue, { id: nextDialogId++, kind, resolve, ...options }];
+  notifyDialogListeners();
+}
+
+export function alertDialog(options: Omit<DialogOptions, "cancelLabel" | "danger" | "defaultValue" | "placeholder">): Promise<void> {
+  return new Promise((resolve) => {
+    enqueueDialog(options, "alert", () => resolve());
+  });
+}
+
+export function confirmDialog(options: Omit<DialogOptions, "defaultValue" | "placeholder">): Promise<boolean> {
+  return new Promise((resolve) => {
+    enqueueDialog(options, "confirm", (value) => resolve(value === true));
+  });
+}
+
+export function promptDialog(options: Omit<DialogOptions, "danger">): Promise<string | null> {
+  return new Promise((resolve) => {
+    enqueueDialog(options, "prompt", (value) => resolve(typeof value === "string" ? value : null));
+  });
+}
+
+function settleDialog(id: number, value: boolean | string | null) {
+  const request = dialogQueue.find((item) => item.id === id);
+  if (!request) return;
+  request.resolve(value);
+  dialogQueue = dialogQueue.filter((item) => item.id !== id);
+  notifyDialogListeners();
+}
+
+export function DialogHost() {
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    const listener = () => forceUpdate((count) => count + 1);
+    dialogListeners.add(listener);
+    return () => {
+      dialogListeners.delete(listener);
+    };
+  }, []);
+  const request = dialogQueue[0];
+  if (!request) return null;
+  return <GenericDialog key={request.id} request={request} onSettle={(value) => settleDialog(request.id, value)} />;
+}
+
+function GenericDialog({ request, onSettle }: { request: DialogRequest; onSettle: (value: boolean | string | null) => void }) {
+  const [value, setValue] = useState(request.defaultValue ?? "");
+  const confirmText = request.confirmLabel ?? (request.kind === "alert" ? "知道了" : "确定");
+  const cancelText = request.cancelLabel ?? "取消";
+
+  function cancel() {
+    onSettle(request.kind === "prompt" ? null : false);
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && cancel()}>
+      <section
+        className={`confirm-dialog ${request.danger ? "is-danger" : ""}`}
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={request.title}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancel();
+          }
+        }}
+      >
+        <div className="dialog-heading">
+          <div><p className="card-kicker">{request.kind === "alert" ? "提示" : request.kind === "confirm" ? "确认操作" : "请输入"}</p><h2>{request.title}</h2></div>
+          <button type="button" onClick={cancel} aria-label="关闭"><X size={20} /></button>
+        </div>
+        <div className="confirm-message">
+          {request.message}
+          {request.kind === "prompt" && (
+            <input
+              autoFocus
+              className="confirm-input"
+              value={value}
+              placeholder={request.placeholder}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onSettle(value);
+                }
+              }}
+            />
+          )}
+        </div>
+        <div className="dialog-footer">
+          <div>
+            {request.kind !== "alert" && <button type="button" className="secondary-button" onClick={cancel}>{cancelText}</button>}
+            <button
+              type="button"
+              className={request.danger ? "danger-button" : "primary-button"}
+              autoFocus={request.kind !== "prompt"}
+              onClick={() => onSettle(request.kind === "prompt" ? value : true)}
+            >{confirmText}</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 export function BackupDialog({ mode, state, candidate, sessions, plans, onClose, onConfirm }: {
   mode: BackupMode;
@@ -256,8 +398,13 @@ export function PhaseEditorDialog({ state, subjectId, phaseId, updateState, onCl
     setResourceForm({ ...resourceForm, name: "", detail: "" });
   }
 
-  function deletePhase() {
-    if (!window.confirm(`确定删除“${activeSubject.name} / ${activePhase.name}”及其中的 ${activePhase.resources.length} 项资料？此操作无法撤销。`)) return;
+  async function deletePhase() {
+    if (!await confirmDialog({
+      title: "删除整个阶段",
+      message: `确定删除“${activeSubject.name} / ${activePhase.name}”及其中的 ${activePhase.resources.length} 项资料？此操作无法撤销。`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     updateState((current) => ({
       ...current,
       subjects: current.subjects.map((item) => item.id === subjectId ? { ...item, phases: item.phases.filter((entry) => entry.id !== phaseId) } : item),

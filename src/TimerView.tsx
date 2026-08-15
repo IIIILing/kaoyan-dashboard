@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { confirmDialog } from "./components/dialogs";
 import type { StudySession, StudyState } from "./study-state";
 import { findOverlappingSessions } from "./session-time";
 
@@ -422,8 +423,8 @@ export default function TimerView({ state, accountId, launchRequest, onLaunchHan
     else setBuiltInBackgrounds((items) => ({ ...items, [effectBase]: background }));
   }
 
-  function deleteCustomEffect(id: string) {
-    if (!window.confirm("确定删除这个自定义效果？")) return;
+  async function deleteCustomEffect(id: string) {
+    if (!await confirmDialog({ title: "删除自定义效果", message: "确定删除这个自定义效果？", danger: true, confirmLabel: "删除" })) return;
     setCustomEffects((items) => items.filter((item) => item.id !== id));
     setShowSecondsByEffect((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     if (effectId === id) setEffectId("minimal");
@@ -456,7 +457,7 @@ export default function TimerView({ state, accountId, launchRequest, onLaunchHan
             <button type="button" onClick={pauseTimer} disabled={status !== "running" && status !== "resting"}><Pause size={19} fill="currentColor" /><span>暂停</span></button>
             <button type="button" className={`focus-rest ${status === "resting" ? "active" : ""}`} onClick={startRest} disabled={status === "idle" || status === "resting" || status === "finished"}><Coffee size={18} /><span>休息</span></button>
             <button type="button" className="focus-finish" onClick={finishTimer} disabled={(status !== "running" && status !== "resting" && status !== "paused") || effectiveActiveMs < 1000}><Square size={17} fill="currentColor" /><span>结束</span></button>
-            <button type="button" onClick={() => (status === "idle" || window.confirm("确定放弃当前计时？本次时间不会保存。")) && resetTimer("本次计时已清空")} disabled={status === "idle"}><RotateCcw size={18} /><span>清空</span></button>
+            <button type="button" onClick={async () => { if (status === "idle" || await confirmDialog({ title: "放弃当前计时", message: "确定放弃当前计时？本次时间不会保存。" })) resetTimer("本次计时已清空"); }} disabled={status === "idle"}><RotateCcw size={18} /><span>清空</span></button>
           </div>
           <p>{feedback || "开始时可预设当前任务；结束后可按实际情况确认、修改或拆分记录。"}</p>
         </footer>

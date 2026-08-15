@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import type { DashboardAccount } from "../lib/accounts";
+import { alertDialog, confirmDialog } from "../components/dialogs";
 import { COLOR_FIELDS, THEME_PALETTES } from "../theme-palettes";
 import {
   defaultStudyState,
@@ -92,13 +93,18 @@ export default function SettingsView({
     const activity: LifeActivity = { id: `life-${crypto.randomUUID()}`, name: "新生活活动", accent: "#6287a8" };
     updateState((current) => ({ ...current, lifeActivities: [...current.lifeActivities, activity] }));
   }
-  function deleteLifeActivity(activity: LifeActivity) {
+  async function deleteLifeActivity(activity: LifeActivity) {
     const referenced = state.sessions.some((session) => session.subjectId === activity.id)
       || state.plans.some((plan) => plan.items.some((item) => item.subjectId === activity.id))
       || state.planTemplates.some((template) => template.items.some((item) => item.subjectId === activity.id));
-    if (!window.confirm(referenced
-      ? `“${activity.name}”已有记录或计划，删除后会从新增下拉框隐藏，历史数据仍会保留。确定继续吗？`
-      : `确定删除生活活动“${activity.name}”？`)) return;
+    if (!await confirmDialog({
+      title: "删除生活活动",
+      message: referenced
+        ? `“${activity.name}”已有记录或计划，删除后会从新增下拉框隐藏，历史数据仍会保留。确定继续吗？`
+        : `确定删除生活活动“${activity.name}”？`,
+      danger: true,
+      confirmLabel: referenced ? "隐藏活动" : "删除",
+    })) return;
     updateState((current) => ({
       ...current,
       lifeActivities: referenced
@@ -124,11 +130,11 @@ export default function SettingsView({
     event.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      window.alert("请选择 PNG、JPG、WEBP 或 SVG 图片。");
+      void alertDialog({ title: "无法上传图标", message: "请选择 PNG、JPG、WEBP 或 SVG 图片。" });
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      window.alert("图标图片不能超过 2 MB。");
+      void alertDialog({ title: "无法上传图标", message: "图标图片不能超过 2 MB。" });
       return;
     }
     const reader = new FileReader();
@@ -223,7 +229,16 @@ export default function SettingsView({
           <label><span>权重</span><input type="number" min="0" max="100" value={subject.weight} onChange={(event) => updateSubject(subject.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
           <label><span>科目颜色</span><input type="color" value={subject.accent} onChange={(event) => updateSubject(subject.id, { accent: event.target.value })} /></label>
           <label className="subject-note-field"><span>科目说明</span><input value={subject.note} onChange={(event) => updateSubject(subject.id, { note: event.target.value })} /></label>
-          <button onClick={() => window.confirm(`确定删除考试科目“${subject.name}”？对应阶段会一起删除，已有时间记录不会自动删除。`) && updateState((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id) }))} aria-label="删除科目"><Trash2 size={16} /></button>
+          <button onClick={async () => {
+            if (await confirmDialog({
+              title: "删除考试科目",
+              message: `确定删除考试科目“${subject.name}”？对应阶段会一起删除，已有时间记录不会自动删除。`,
+              danger: true,
+              confirmLabel: "删除",
+            })) {
+              updateState((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id) }));
+            }
+          }} aria-label="删除科目"><Trash2 size={16} /></button>
         </article>)}</div>
       </section>
       <section className="panel settings-card">

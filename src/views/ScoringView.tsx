@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
+import { confirmDialog } from "../components/dialogs";
 import { ProgressRing } from "../components/ui";
 import { formatMinutes } from "../lib/format";
 import type { PeriodSummary } from "../lib/scoring";
@@ -83,7 +84,16 @@ export default function ScoringView({ state, week, month, updateState }: {
               <label><span>数据指标</span><select value={rule.metric} onChange={(event) => updateWeeklyRule(rule.id, { metric: event.target.value as WeeklyRuleMetric })}>{WEEKLY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}</select></label>
               <label><span>权重</span><input type="number" min="0" max="100" value={rule.weight} onChange={(event) => updateWeeklyRule(rule.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
               <label className="rule-description"><span>说明</span><input value={rule.description} onChange={(event) => updateWeeklyRule(rule.id, { description: event.target.value })} /></label>
-              <button className="rule-delete" onClick={() => window.confirm(`确定删除评分规则“${rule.name}”？`) && updateState((current) => ({ ...current, scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.filter((item) => item.id !== rule.id) } }))} aria-label="删除规则"><Trash2 size={16} /></button>
+              <button className="rule-delete" onClick={async () => {
+                if (await confirmDialog({
+                  title: "删除评分规则",
+                  message: `确定删除评分规则“${rule.name}”？`,
+                  danger: true,
+                  confirmLabel: "删除",
+                })) {
+                  updateState((current) => ({ ...current, scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.filter((item) => item.id !== rule.id) } }));
+                }
+              }} aria-label="删除规则"><Trash2 size={16} /></button>
             </article>
           ))}
         </div>

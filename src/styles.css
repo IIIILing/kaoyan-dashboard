@@ -1296,3 +1296,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .import-preview-list li { flex-direction: column; align-items: flex-start; gap: 2px; }
   .import-preview-list em { text-align: left; }
 }
+
+/* 通用确认/提示/输入对话框(DialogHost,Promise API) */
+.confirm-dialog { width: min(460px, 100%); max-height: calc(100vh - 44px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 22px 70px rgba(0,0,0,.26); padding: 25px; }
+.confirm-dialog .dialog-footer { justify-content: flex-end; }
+.confirm-message { color: var(--text); font-size: 13px; line-height: 1.8; }
+.confirm-message .confirm-input { margin-top: 14px; }
+.confirm-message .confirm-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }

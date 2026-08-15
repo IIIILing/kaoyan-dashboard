@@ -1,5 +1,6 @@
 import { Clock3, Pencil, Plus, Save, Target, Trash2, TrendingUp, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { confirmDialog } from "./components/dialogs";
 import { scoreRate } from "./exam-data";
 import type { ExamPaperType, ExamRecord, ExamSection, StudyState } from "./study-state";
 
@@ -59,8 +60,13 @@ export default function ExamsView({ state, updateState }: { state: StudyState; u
     setEditing(null);
   }
 
-  function remove(record: ExamRecord) {
-    if (!window.confirm(`确定删除“${record.paperName}”的成绩记录？`)) return;
+  async function remove(record: ExamRecord) {
+    if (!await confirmDialog({
+      title: "删除成绩记录",
+      message: `确定删除“${record.paperName}”的成绩记录？`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     updateState((current) => ({ ...current, examRecords: current.examRecords.filter((item) => item.id !== record.id) }));
   }
 

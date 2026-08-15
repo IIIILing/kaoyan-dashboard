@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Clock3, Copy, Plus, Save, Trash2 } from "lucide-react";
+import { confirmDialog, promptDialog } from "../components/dialogs";
 import { DayScheduleChart, EditablePlanTable, EditableSessionTable } from "../components/tables";
 import { EmptyState } from "../components/ui";
 import { dateOffset, localDate } from "../lib/dates";
@@ -46,29 +47,47 @@ export default function TodayView({ state, plan, sessions, metrics, planDate, on
     }));
   }
 
-  function saveAsTemplate() {
+  async function saveAsTemplate() {
     if (!plan.items.length) return;
-    const name = window.prompt("请输入模板名称，例如：高强度数学日");
+    const name = await promptDialog({
+      title: "保存为计划模板",
+      message: "请输入模板名称，例如：高强度数学日",
+      placeholder: "例如：高强度数学日",
+    });
     if (!name?.trim()) return;
     const template: PlanTemplate = { id: crypto.randomUUID(), name: name.trim(), items: clonePlanItems(plan.items) };
     updateState((current) => ({ ...current, planTemplates: [...current.planTemplates, template] }));
     setSelectedTemplateId(template.id);
   }
 
-  function copyPreviousPlan() {
+  async function copyPreviousPlan() {
     if (!previousPlan?.items.length) return;
-    if (plan.items.length && !window.confirm(`复制 ${previousPlanDate} 的计划会替换当前日期已有计划，是否继续？`)) return;
+    if (plan.items.length && !await confirmDialog({
+      title: "复制前一天计划",
+      message: `复制 ${previousPlanDate} 的计划会替换当前日期已有计划，是否继续？`,
+      confirmLabel: "继续",
+    })) return;
     replaceTodayPlan(clonePlanItems(previousPlan.items));
   }
 
-  function applyTemplate() {
+  async function applyTemplate() {
     if (!selectedTemplate) return;
-    if (plan.items.length && !window.confirm(`应用“${selectedTemplate.name}”会替换今天已有计划，是否继续？`)) return;
+    if (plan.items.length && !await confirmDialog({
+      title: "应用计划模板",
+      message: `应用“${selectedTemplate.name}”会替换今天已有计划，是否继续？`,
+      confirmLabel: "继续",
+    })) return;
     replaceTodayPlan(clonePlanItems(selectedTemplate.items));
   }
 
-  function deleteTemplate() {
-    if (!selectedTemplate || !window.confirm(`确定删除计划模板“${selectedTemplate.name}”？`)) return;
+  async function deleteTemplate() {
+    if (!selectedTemplate) return;
+    if (!await confirmDialog({
+      title: "删除计划模板",
+      message: `确定删除计划模板“${selectedTemplate.name}”？`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     updateState((current) => ({
       ...current,
       planTemplates: current.planTemplates.filter((template) => template.id !== selectedTemplate.id),

@@ -23,7 +23,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { BackupDialog, PlanItemDialog, RecordDialog } from "./components/dialogs";
+import { BackupDialog, DialogHost, PlanItemDialog, RecordDialog, alertDialog, confirmDialog } from "./components/dialogs";
 import {
   ACCOUNT_REGISTRY_KEY,
   ACCOUNT_STATE_PREFIX,
@@ -517,11 +517,11 @@ export default function Dashboard() {
   function addAccount(name: string) {
     const accountName = name.trim();
     if (!accountName) {
-      window.alert("请输入账号名称。");
+      void alertDialog({ title: "无法创建账号", message: "请输入账号名称。" });
       return false;
     }
     if (accounts.some((account) => account.name.toLocaleLowerCase() === accountName.toLocaleLowerCase())) {
-      window.alert("已有同名账号，请换一个名称。");
+      void alertDialog({ title: "无法创建账号", message: "已有同名账号，请换一个名称。" });
       return false;
     }
     if (activeAccountId) {
@@ -547,14 +547,14 @@ export default function Dashboard() {
   function renameAccount(accountId: string, name: string) {
     const accountName = name.trim();
     if (!accountName) {
-      window.alert("账号名称不能为空。");
+      void alertDialog({ title: "无法重命名", message: "账号名称不能为空。" });
       return false;
     }
     if (accounts.some((account) =>
       account.id !== accountId
       && account.name.toLocaleLowerCase() === accountName.toLocaleLowerCase()
     )) {
-      window.alert("已有同名账号，请换一个名称。");
+      void alertDialog({ title: "无法重命名", message: "已有同名账号，请换一个名称。" });
       return false;
     }
     setAccounts((current) => current.map((account) =>
@@ -569,13 +569,19 @@ export default function Dashboard() {
     return true;
   }
 
-  function deleteAccount(accountId: string) {
+  async function deleteAccount(accountId: string) {
     if (accountId === activeAccountId) {
-      window.alert("当前正在使用的账号不能删除，请先切换到其他账号。");
+      void alertDialog({ title: "无法删除账号", message: "当前正在使用的账号不能删除，请先切换到其他账号。" });
       return;
     }
     const account = accounts.find((item) => item.id === accountId);
-    if (!account || !window.confirm(`确定删除账号“${account.name}”及其全部本机数据？此操作无法撤销。`)) return;
+    if (!account) return;
+    if (!await confirmDialog({
+      title: "删除账号",
+      message: `确定删除账号“${account.name}”及其全部本机数据？此操作无法撤销。`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     window.localStorage.removeItem(accountStateKey(accountId));
     setAccounts((current) => current.filter((item) => item.id !== accountId));
   }
@@ -652,7 +658,7 @@ export default function Dashboard() {
 
   function startPlanTimer(item: PlanItem) {
     if (planDate !== localDate()) {
-      window.alert("只能从今天的计划开始计时。请先切换回今天。");
+      void alertDialog({ title: "无法开始计时", message: "只能从今天的计划开始计时。请先切换回今天。" });
       return;
     }
     setTimerLaunch({
@@ -749,7 +755,7 @@ export default function Dashboard() {
         setImportCandidate(next);
         setBackupMode("import");
       } catch {
-        window.alert("无法导入：请选择日程归档、旧版整站备份或旧版计划 JSON 文件。");
+        void alertDialog({ title: "无法导入", message: "请选择日程归档、旧版整站备份或旧版计划 JSON 文件。" });
       }
     };
     reader.readAsText(file);
@@ -768,9 +774,10 @@ export default function Dashboard() {
     }));
     setBackupMode(null);
     setImportCandidate(null);
-    window.alert(
-      `导入完成。时间记录：新增 ${merged.sessions.report.added} 条，重复 ${merged.sessions.report.duplicates} 条，顺延 ${merged.sessions.report.shifted} 条，跳过 ${merged.sessions.report.skipped} 条；今日计划：新增 ${merged.plans.report.added} 条，重复 ${merged.plans.report.duplicates} 条，顺延 ${merged.plans.report.shifted} 条，跳过 ${merged.plans.report.skipped} 条；计划模板：新增 ${merged.templates.added} 个，重复 ${merged.templates.duplicates} 个；成绩记录：新增 ${merged.exams.added} 条，重复 ${merged.exams.duplicates} 条；复习项：新增 ${merged.reviews.added} 条，重复 ${merged.reviews.duplicates} 条。`,
-    );
+    void alertDialog({
+      title: "导入完成",
+      message: `时间记录：新增 ${merged.sessions.report.added} 条，重复 ${merged.sessions.report.duplicates} 条，顺延 ${merged.sessions.report.shifted} 条，跳过 ${merged.sessions.report.skipped} 条；今日计划：新增 ${merged.plans.report.added} 条，重复 ${merged.plans.report.duplicates} 条，顺延 ${merged.plans.report.shifted} 条，跳过 ${merged.plans.report.skipped} 条；计划模板：新增 ${merged.templates.added} 个，重复 ${merged.templates.duplicates} 个；成绩记录：新增 ${merged.exams.added} 条，重复 ${merged.exams.duplicates} 条；复习项：新增 ${merged.reviews.added} 条，重复 ${merged.reviews.duplicates} 条。`,
+    });
   }
 
   const viewTitle = NAV.find((item) => item.id === view)?.label ?? "总览";
@@ -961,8 +968,16 @@ export default function Dashboard() {
             lastSavedAt={lastSavedAt}
             onExport={() => setBackupMode("export")}
             onImport={() => importRef.current?.click()}
-            onReset={() => window.confirm("确定恢复当前账号的初始信息？当前账号的现有记录将被清空。")
-              && setState(freshStudyState(activeAccount?.name ?? "默认账号"))}
+            onReset={async () => {
+              if (await confirmDialog({
+                title: "恢复初始数据",
+                message: "确定恢复当前账号的初始信息？当前账号的现有记录将被清空。",
+                danger: true,
+                confirmLabel: "恢复",
+              })) {
+                setState(freshStudyState(activeAccount?.name ?? "默认账号"));
+              }
+            }}
           />
         )}
         <input ref={importRef} type="file" hidden accept="application/json" onChange={(event) => {
@@ -985,6 +1000,8 @@ export default function Dashboard() {
           onConfirm={backupMode === "import" ? importData : exportData}
         />
       )}
+      {/* 全局对话框宿主:alertDialog / confirmDialog / promptDialog 的渲染出口 */}
+      <DialogHost />
       {undoAction && <div className="undo-toast" role="status" aria-live="polite"><span>{undoAction.message}</span><button type="button" onClick={undoLastAction}><Undo2 size={16} />撤销</button><button type="button" className="undo-toast-close" onClick={dismissUndo} aria-label="关闭撤销提示"><X size={15} /></button></div>}
     </div>
   );

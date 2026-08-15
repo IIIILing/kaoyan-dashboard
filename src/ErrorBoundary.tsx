@@ -6,6 +6,7 @@ type ErrorBoundaryProps = {
 
 type ErrorBoundaryState = {
   error: Error | null;
+  exportedCount?: number | null;
 };
 
 /**
@@ -14,7 +15,7 @@ type ErrorBoundaryState = {
  * 「重新加载」与「导出本机全部数据」两个恢复出口。
  */
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = { error: null, exportedCount: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error };
@@ -56,7 +57,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
     anchor.download = `kaoyan-dashboard-全量备份-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-    window.alert(`已导出 ${count} 个本机数据项。请妥善保存该文件,后续可在「设置 → 导入备份」恢复。`);
+    this.setState({ exportedCount: count });
   }
 
   render() {
@@ -84,6 +85,9 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
               导出本机全部数据
             </button>
           </div>
+          {this.state.exportedCount !== null && (
+            <p style={styles.exportNote}>已导出 {this.state.exportedCount} 个本机数据项。请妥善保存该文件，后续可在「设置 → 导入备份」恢复。</p>
+          )}
           <p style={styles.footnote}>数据不会上传到任何服务器。</p>
         </div>
       </div>
@@ -145,4 +149,13 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   footnote: { margin: "18px 0 0", fontSize: 11.5, color: "#9aa2ab" },
+  exportNote: {
+    margin: "14px 0 0",
+    padding: "10px 12px",
+    borderRadius: 8,
+    background: "#eaf3ec",
+    color: "#2e6b45",
+    fontSize: 12.5,
+    lineHeight: 1.6,
+  },
 };

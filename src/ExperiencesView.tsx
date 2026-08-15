@@ -1,5 +1,6 @@
 import { Download, FileUp, Plus, Save, Target, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
+import { alertDialog, confirmDialog } from "./components/dialogs";
 import {
   CANONICAL_EXPERIENCE_SUBJECTS,
   createEmptyExperience,
@@ -88,12 +89,17 @@ export default function ExperiencesView({ state, updateState }: Props) {
     setSelectedId(experience.id);
   }
 
-  function deleteExperience(experience: ExperiencePost) {
+  async function deleteExperience(experience: ExperiencePost) {
     if (state.experiences.length <= 1) {
-      window.alert("至少保留一条经验。你可以清空当前经验的字段，或先新增一条再删除。");
+      void alertDialog({ title: "无法删除", message: "至少保留一条经验。你可以清空当前经验的字段，或先新增一条再删除。" });
       return;
     }
-    if (!window.confirm(`确定删除“${experience.title}”？此操作只影响当前账号，且无法撤销。`)) return;
+    if (!await confirmDialog({
+      title: "删除经验贴",
+      message: `确定删除“${experience.title}”？此操作只影响当前账号，且无法撤销。`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     const remaining = state.experiences.filter((item) => item.id !== experience.id);
     updateState((current) => ({
       ...current,
@@ -108,9 +114,14 @@ export default function ExperiencesView({ state, updateState }: Props) {
     updateExperience(experience.id, { subjects: [...experience.subjects, subject] });
   }
 
-  function deleteSubject(experience: ExperiencePost, subject: ExperienceSubject) {
+  async function deleteSubject(experience: ExperiencePost, subject: ExperienceSubject) {
     if (CANONICAL_IDS.has(subject.id)) return;
-    if (!window.confirm(`确定删除自定义科目“${subject.name}”及其结构化内容？`)) return;
+    if (!await confirmDialog({
+      title: "删除自定义科目",
+      message: `确定删除自定义科目“${subject.name}”及其结构化内容？`,
+      danger: true,
+      confirmLabel: "删除",
+    })) return;
     updateExperience(experience.id, { subjects: experience.subjects.filter((item) => item.id !== subject.id) });
   }
 
@@ -145,9 +156,9 @@ export default function ExperiencesView({ state, updateState }: Props) {
           return { ...current, experiences: next, fastestExperienceId: importedFastest };
         });
         setSelectedId(imported.experiences[0].id);
-        window.alert(`导入完成：${imported.experiences.length} 条经验。相同 ID 已更新，不同 ID 已追加；未识别扩展字段会随对象保留并可再次导出。`);
+        void alertDialog({ title: "导入完成", message: `${imported.experiences.length} 条经验已导入。相同 ID 已更新，不同 ID 已追加；未识别扩展字段会随对象保留并可再次导出。` });
       } catch {
-        window.alert("无法导入：请选择经验贴页面导出的 JSON、经验数组或单条经验对象。");
+        void alertDialog({ title: "无法导入", message: "请选择经验贴页面导出的 JSON、经验数组或单条经验对象。" });
       }
     };
     reader.readAsText(file);
