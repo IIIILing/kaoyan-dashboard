@@ -4,7 +4,7 @@
 
 > **✅ P2 已完成(2025-07,提交 8b30a1c / 710e1cc / 97a224a)**:P2-B 导入预览、P2-A 33 处原生弹窗统一改造(新增 `alertDialog / confirmDialog / promptDialog` + `DialogHost`,详见 §5)、P2-C 的 CI 测试门禁 / 清死代码 / 删账号 undo 均已落地。本文件保留原清单供查阅,新窗口如接手新任务(P3),直接照 §6 环境约定开工即可。
 
-> **📌 后续小修(2025-07,commit `pending`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署。
+> **📌 后续小修(2025-07,commit `d7283fb`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署;移动端验收通过。
 
 ---
 
@@ -161,7 +161,7 @@ src/
 1. **CI 加测试门禁** — ✅ 已做(`deploy-pages.yml` 在 build 前执行 `npm test`,测试失败不发布)
 2. **清死代码** — ✅ 已做(`PlanTable`、后续清理的 `SessionTable` 均已删除)
 3. **破坏性操作接入 undo** — ✅ 已做(删账号接入 `offerUndo`)
-4. **移动端验收** — ⬜ 未做(建议:`dev` 下用响应式模式过一遍 `.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart`;styles.css 已有 640/768/860px 断点)
+4. **移动端验收** — ✅ 已做(2025-07 响应式验收通过:`.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart` 在 640/768/860px 断点下表现正常)
 
 ## 6. 环境与约定(本仓库工作环境)
 
