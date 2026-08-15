@@ -578,12 +578,18 @@ export default function Dashboard() {
     if (!account) return;
     if (!await confirmDialog({
       title: "删除账号",
-      message: `确定删除账号“${account.name}”及其全部本机数据？此操作无法撤销。`,
+      message: `确定删除账号“${account.name}”及其全部本机数据？8 秒内可撤销。`,
       danger: true,
       confirmLabel: "删除",
     })) return;
+    // 删除前保留原始存储快照,供 offerUndo 在 8 秒内恢复。
+    const storedSnapshot = window.localStorage.getItem(accountStateKey(accountId));
     window.localStorage.removeItem(accountStateKey(accountId));
     setAccounts((current) => current.filter((item) => item.id !== accountId));
+    offerUndo(`已删除账号“${account.name}”`, () => {
+      if (storedSnapshot !== null) window.localStorage.setItem(accountStateKey(accountId), storedSnapshot);
+      setAccounts((current) => current.some((item) => item.id === accountId) ? current : [...current, account]);
+    });
   }
 
   function updateState(updater: (current: StudyState) => StudyState) {

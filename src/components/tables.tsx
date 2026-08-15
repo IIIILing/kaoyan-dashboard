@@ -53,10 +53,6 @@ export function EditablePlanTable({ items, sessions, state, canStart, onStart, o
   })}</div>;
 }
 
-export function PlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
-  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId, state.lifeActivities); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
-}
-
 export function DayScheduleChart({ entries, state, mode }: {
   entries: (StudySession | PlanItem)[];
   state: StudyState;
