@@ -4,6 +4,8 @@
 
 > **✅ P2 已完成(2025-07,提交 8b30a1c / 710e1cc / 97a224a)**:P2-B 导入预览、P2-A 33 处原生弹窗统一改造(新增 `alertDialog / confirmDialog / promptDialog` + `DialogHost`,详见 §5)、P2-C 的 CI 测试门禁 / 清死代码 / 删账号 undo 均已落地。本文件保留原清单供查阅,新窗口如接手新任务(P3),直接照 §6 环境约定开工即可。
 
+> **📌 后续小修(2025-07,commit `pending`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署。
+
 ---
 
 ## 0. 一句话背景
@@ -15,11 +17,12 @@
 | 项 | 值 |
 |---|---|
 | 当前分支 | `codex/study-loop-roadmap` |
-| 最近提交 | `97a224a` — chore: CI 加测试门禁,清死代码,删账号接入 undo(P2 三项提交的最后一项) |
+| 最近提交 | 见 git log(2025-07 已完成 P0+P1+P2 全部改动,含合并到 `main` 的部署提交) |
 | 工作区 | 干净(无未提交改动) |
 | 测试 | 59 个断言全部通过(`npm test`,含新增 import-merge 3 个) |
 | 构建 | `npm run build` 通过 |
 | 原生弹窗 | 全项目 `window.alert/confirm/prompt` 已清零,统一走自定义对话框 |
+| 部署 | 合并到 `main` 后由 GitHub Actions 自动构建、测试并发布到 GitHub Pages |
 
 ## 2. 常用命令
 
@@ -35,10 +38,11 @@ npm run preview    # 预览构建产物
 
 ```
 src/
-├── App.tsx                  # 998 行:状态编排 / 持久化 / 账号管理 / 路由 / undo
+├── App.tsx                  # 约 1014 行:状态编排 / 持久化 / 账号管理 / 路由 / undo / DialogHost 挂载
 ├── main.tsx                 # 入口,包了 <ErrorBoundary>
 ├── ErrorBoundary.tsx        # 全局错误边界(崩溃时可导出本机全部数据)
 ├── study-state.ts           # 数据模型 StudyState(v3)+ 默认值(科目/阶段/评分)
+├── import-merge.ts          # 导入合并统一入口:computeImportMerge(预览与实导共用一份计算)
 ├── lib/                     # ★ 纯工具(全部可单测,已测)
 │   ├── types.ts             # View / BackupMode / RecordDraft
 │   ├── accounts.ts          # 账号类型、localStorage keys、freshStudyState
@@ -48,17 +52,18 @@ src/
 │   └── scoring.ts           # 评分引擎:dailyMetrics / periodSummary / 权重曲线
 ├── components/
 │   ├── ui.tsx               # ProgressRing / ScoreRow / EmptyState / ScoreGuide / MiniTrend
-│   ├── tables.tsx           # 日程图表、记录/计划表格(含未使用的 PlanTable,可清)
+│   ├── tables.tsx           # 日程图表、记录/计划表格(EditableSessionTable / EditablePlanTable)
 │   └── dialogs.tsx          # BackupDialog / RecordDialog / PlanItemDialog / PhaseEditorDialog
+│                            # + 通用对话框服务:alertDialog / confirmDialog / promptDialog / DialogHost
 ├── views/                   # 页面视图(均 default export,props 由 App 传入)
 │   ├── Overview.tsx  TodayView.tsx  RecordsView.tsx  SubjectsView.tsx
 │   ├── WeeklyView.tsx  ScoringView.tsx  SettingsView.tsx
-├── __tests__/               # ★ 6 个测试文件 / 56 断言(会被 tsc -b 类型检查)
+├── __tests__/               # ★ 7 个测试文件 / 59 断言(会被 tsc -b 类型检查)
 ├── TimerView.tsx  ExamsView.tsx  ReviewView.tsx  ExperiencesView.tsx
 ├── WeeklyInsights.tsx  ExperienceBenchmarkPanel.tsx
 ├── exam-data.ts  review-data.ts  experience-data.ts  schedule-data.ts
 ├── progress-forecast.ts  weekly-insights.ts  session-time.ts  time-range.ts
-└── theme-palettes.ts  styles.css(116KB 单一全局样式)
+└── theme-palettes.ts  styles.css(约 117KB 单一全局样式)
 ```
 
 ## 4. 已完成工作(新窗口**不需要**重做,了解机制即可)
@@ -66,7 +71,7 @@ src/
 - **P0-1 备份提醒横幅**:有数据且超 7 天未导出 JSON 时,页面顶部出现横幅,可"今日不再提醒"。逻辑在 `App.tsx`(常量 `BACKUP_REMINDER_DAYS` / `BACKUP_DISMISS_KEY` + `showBackupReminder` 计算 + 横幅 JSX),样式 `.backup-reminder-banner` 在 `styles.css` 末尾。
 - **P0-2 关页强制保存**:`beforeunload` + `visibilitychange(hidden)` 同步写 localStorage,防防抖(250ms)窗口丢数据。用 `stateRef/accountIdRef/loadedRef` 取最新值。
 - **P1-9 ErrorBoundary**:`src/ErrorBoundary.tsx`,崩溃时显示"重新加载 + 导出本机全部数据"(遍历 `kaoyan-dashboard-*` keys)。
-- **P1-5 Vitest 56 单测**:覆盖 `session-time` / `time-range` / `schedule-data`(导入查重·顺延)/ `progress-forecast` / `exam-data` / `review-data`。改这些纯函数时**必须保证测试仍绿**。
+- **P1-5 Vitest 单测**:P1 落地 56 个断言,覆盖 `session-time` / `time-range` / `schedule-data`(导入查重·顺延)/ `progress-forecast` / `exam-data` / `review-data`;P2 新增 `import-merge`(导入预览)3 个,共 59 个。改这些纯函数时**必须保证测试仍绿**。
 - **P1-6 拆分 App.tsx**:2457 行 → 998 行。视图通过 props 通信,无循环依赖。
 
 ### 关键机制(改代码前必读)
@@ -153,10 +158,10 @@ src/
 
 ### P2-C 可选优化(时间充裕再做)
 
-1. **CI 加测试门禁**:`.github/workflows/deploy-pages.yml` 的 `build` job 在 `npm ci` 后插入 `npm test`,防止回归(注意:vitest 无 jsdom 依赖,纯 node 环境即可跑)。
-2. **清死代码**:`src/components/tables.tsx` 的 `PlanTable` 无任何引用(重构前就未使用)。
-3. **破坏性操作接入 undo**:删账号/删科目/删阶段目前只有 confirm 无 undo,可复用 `offerUndo`(App.tsx 已有,删除记录/计划在用)。
-4. **移动端验收**:`.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart` 在小屏下的表现过一遍(styles.css 已有 640/768/860px 断点)。
+1. **CI 加测试门禁** — ✅ 已做(`deploy-pages.yml` 在 build 前执行 `npm test`,测试失败不发布)
+2. **清死代码** — ✅ 已做(`PlanTable`、后续清理的 `SessionTable` 均已删除)
+3. **破坏性操作接入 undo** — ✅ 已做(删账号接入 `offerUndo`)
+4. **移动端验收** — ⬜ 未做(建议:`dev` 下用响应式模式过一遍 `.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart`;styles.css 已有 640/768/860px 断点)
 
 ## 6. 环境与约定(本仓库工作环境)
 
