@@ -71,7 +71,7 @@ import SubjectsView from "./views/SubjectsView";
 import TodayView from "./views/TodayView";
 import WeeklyView from "./views/WeeklyView";
 
-type SaveStatus = "loading" | "saving" | "saved";
+type SaveStatus = "loading" | "saving" | "saved" | "error";
 type UndoAction = {
   id: string;
   message: string;
@@ -250,6 +250,7 @@ export default function Dashboard() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [lastSavedAt, setLastSavedAt] = useState("");
+  const [saveError, setSaveError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordEditing, setRecordEditing] = useState<StudySession | null>(null);
@@ -365,9 +366,16 @@ export default function Dashboard() {
     if (!loaded || !activeAccountId) return;
     queueMicrotask(() => setSaveStatus("saving"));
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
-      setSaveStatus("saved");
-      setLastSavedAt(new Date().toISOString());
+      try {
+        window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
+        setSaveStatus("saved");
+        setLastSavedAt(new Date().toISOString());
+        setSaveError(false);
+      } catch {
+        // 配额不足或写入失败:标记错误并在页面顶部预警,避免"静默丢数据"。
+        setSaveStatus("error");
+        setSaveError(true);
+      }
     }, 250);
     return () => window.clearTimeout(timer);
   }, [state, loaded, activeAccountId]);
@@ -881,7 +889,7 @@ export default function Dashboard() {
             </label>
             <div className={`sync-state ${saveStatus}`} title="学习数据仅保存在当前浏览器">
               <HardDrive size={16} />
-              <span>{saveStatus === "loading" ? "正在读取" : saveStatus === "saving" ? "正在保存" : "已保存到本机"}</span>
+              <span>{saveStatus === "loading" ? "正在读取" : saveStatus === "saving" ? "正在保存" : saveStatus === "error" ? "保存失败" : "已保存到本机"}</span>
             </div>
           </div>
         </header>
@@ -895,6 +903,17 @@ export default function Dashboard() {
             </div>
             <button type="button" className="primary-button" onClick={() => setBackupMode("export")}><Download size={15} />立即备份</button>
             <button type="button" className="backup-reminder-dismiss" onClick={dismissBackupReminder} aria-label="今日不再提醒" title="今日不再提醒"><X size={15} /></button>
+          </div>
+        )}
+
+        {saveError && (
+          <div className="storage-full-banner" role="alert">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>本机存储空间不足,最近的修改可能没有保存</strong>
+              <span>请立即导出 JSON 备份;也可以在「设置 → 侧栏图标」或计时器背景图中移除较大的图片来释放空间。</span>
+            </div>
+            <button type="button" className="primary-button" onClick={() => setBackupMode("export")}><Download size={15} />导出备份</button>
           </div>
         )}
 

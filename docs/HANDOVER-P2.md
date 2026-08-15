@@ -6,6 +6,8 @@
 
 > **📌 后续小修(2025-07,commit `d7283fb`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署;移动端验收通过。
 
+> **📌 数据可靠性加固(2025-07,commit 待填)**:① 防抖保存加 try/catch,写入失败时顶栏显示"保存失败"并出现"存储空间不足"预警横幅(含导出备份入口);② 新增评分引擎单测 `src/__tests__/scoring.test.ts`(12 个断言,覆盖权重曲线、dailyMetrics、periodSummary),测试总数 59 → 71。
+
 ---
 
 ## 0. 一句话背景

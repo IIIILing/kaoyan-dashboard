@@ -1303,3 +1303,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .confirm-message { color: var(--text); font-size: 13px; line-height: 1.8; }
 .confirm-message .confirm-input { margin-top: 14px; }
 .confirm-message .confirm-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* 保存失败预警(存储配额不足) */
+.storage-full-banner { display: flex; align-items: center; gap: 12px; margin: -6px 0 20px; padding: 12px 14px; border: 1px solid color-mix(in srgb,var(--danger) 45%,var(--line)); border-radius: 10px; color: var(--text); background: color-mix(in srgb,var(--danger) 8%,transparent); }
+.storage-full-banner > svg { flex: none; color: var(--danger); }
+.storage-full-banner > div { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.storage-full-banner strong { font-size: 13px; }
+.storage-full-banner span { color: var(--muted); font-size: 12px; }
+.storage-full-banner .primary-button { flex: none; min-height: 30px; padding: 0 12px; font-size: 11px; }
+.sync-state.error { color: var(--danger); border-color: color-mix(in srgb,var(--danger) 40%,var(--line)); }
+@media (max-width: 640px) {
+  .storage-full-banner { flex-wrap: wrap; }
+  .storage-full-banner > div { flex-basis: 100%; }
+}
