@@ -13,9 +13,10 @@ import {
 import { lifeActivity } from "../lib/activities";
 import { isInRange, localDate, presetRange } from "../lib/dates";
 import { formatMinutes, minutesBetween } from "../lib/format";
+import { computeImportMerge } from "../import-merge";
 import type { BackupMode, RecordDraft } from "../lib/types";
 import { phaseForecast, recordPhaseProgress } from "../progress-forecast";
-import type { DateRange } from "../schedule-data";
+import type { DateRange, ScheduleImportCandidate } from "../schedule-data";
 import { findOverlappingSessions } from "../session-time";
 import type { DailyPlan, PlanItem, StudyResource, StudySession, StudyState, Subject } from "../study-state";
 import { findOverlappingPlanItems, scheduledTimeRange } from "../time-range";
@@ -28,8 +29,10 @@ const RESOURCE_TYPES = [
   { value: "other", label: "其他" },
 ] as const;
 
-export function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
+export function BackupDialog({ mode, state, candidate, sessions, plans, onClose, onConfirm }: {
   mode: BackupMode;
+  state: StudyState;
+  candidate: ScheduleImportCandidate | null;
   sessions: StudySession[];
   plans: DailyPlan[];
   onClose: () => void;
@@ -47,6 +50,10 @@ export function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
     .filter((item) => isInRange(item.date, range))
     .reduce((sum, item) => sum + item.items.length, 0);
   const invalid = !range.from || !range.to || range.from > range.to;
+  // 导入预览:与 importData 共用同一份合并计算,试算结果就是确认后的真实结果。
+  const preview = mode === "import" && candidate && !invalid
+    ? computeImportMerge(state, candidate, range)
+    : null;
 
   function applyPreset(preset: "day" | "week" | "month") {
     setRange(presetRange(preset, anchor));
@@ -80,6 +87,18 @@ export function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
             <div className="conflict-policy">
               <strong>导入冲突规则</strong>
               <p>时间记录和今日计划都会按日期、起止时间及任务名称查重;不同任务的时段重叠时,导入项按原时长顺延到当天最早空闲时段,并写入调整备注,不覆盖已有数据。</p>
+            </div>
+          )}
+          {preview && (
+            <div className="import-preview">
+              <div className="import-preview-title"><strong>导入预览</strong><span>按当前日期范围试算,确认后才会真正合并</span></div>
+              <ul className="import-preview-list">
+                <li><span>时间记录</span><em>新增 {preview.sessions.report.added} 条 · 重复 {preview.sessions.report.duplicates} 条 · 顺延 {preview.sessions.report.shifted} 条 · 跳过 {preview.sessions.report.skipped} 条</em></li>
+                <li><span>今日计划</span><em>新增 {preview.plans.report.added} 条 · 重复 {preview.plans.report.duplicates} 条 · 顺延 {preview.plans.report.shifted} 条 · 跳过 {preview.plans.report.skipped} 条</em></li>
+                <li><span>计划模板</span><em>新增 {preview.templates.added} 个 · 重复 {preview.templates.duplicates} 个</em></li>
+                <li><span>成绩记录</span><em>新增 {preview.exams.added} 条 · 重复 {preview.exams.duplicates} 条</em></li>
+                <li><span>复习项</span><em>新增 {preview.reviews.added} 条 · 重复 {preview.reviews.duplicates} 条</em></li>
+              </ul>
             </div>
           )}
         </div>

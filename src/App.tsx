@@ -33,18 +33,16 @@ import {
   type AccountRegistry,
   type DashboardAccount,
 } from "./lib/accounts";
-import { daysUntil, isInRange, localDate, recentDates } from "./lib/dates";
+import { daysUntil, localDate, recentDates } from "./lib/dates";
 import { downloadFile, minutesBetween } from "./lib/format";
 import { dailyMetrics, periodSummary, sessionsForDate } from "./lib/scoring";
 import type { BackupMode, RecordDraft, View } from "./lib/types";
 import { normalizeExperiences } from "./experience-data";
-import { mergeExamRecords, normalizeExamRecords } from "./exam-data";
-import { mergeReviewItems, normalizeReviewItems } from "./review-data";
+import { normalizeExamRecords } from "./exam-data";
+import { computeImportMerge } from "./import-merge";
+import { normalizeReviewItems } from "./review-data";
 import {
   createScheduleArchive,
-  mergeImportedPlans,
-  mergeImportedSessions,
-  mergeImportedTemplates,
   parseScheduleImport,
   withUnifiedSchedule,
   type DateRange,
@@ -759,26 +757,19 @@ export default function Dashboard() {
 
   function importData(range: DateRange) {
     if (!importCandidate) return;
-    const selectedSessions = importCandidate.sessions.filter((item) => isInRange(item.date, range));
-    const selectedPlans = importCandidate.plans.filter((item) => isInRange(item.date, range));
-    const selectedExamRecords = importCandidate.examRecords.filter((item) => isInRange(item.date, range));
-    const sessionMerge = mergeImportedSessions(state.sessions, selectedSessions);
-    const planMerge = mergeImportedPlans(state.plans, selectedPlans);
-    const templateMerge = mergeImportedTemplates(state.planTemplates, importCandidate.planTemplates);
-    const examMerge = mergeExamRecords(state.examRecords, selectedExamRecords);
-    const reviewMerge = mergeReviewItems(state.reviewItems, importCandidate.reviewItems);
+    const merged = computeImportMerge(state, importCandidate, range);
     setState((current) => withUnifiedSchedule({
       ...current,
-      sessions: sessionMerge.sessions,
-      plans: planMerge.plans,
-      planTemplates: templateMerge.templates,
-      examRecords: examMerge.records,
-      reviewItems: reviewMerge.items,
+      sessions: merged.sessions.sessions,
+      plans: merged.plans.plans,
+      planTemplates: merged.templates.templates,
+      examRecords: merged.exams.records,
+      reviewItems: merged.reviews.items,
     }));
     setBackupMode(null);
     setImportCandidate(null);
     window.alert(
-      `导入完成。时间记录：新增 ${sessionMerge.report.added} 条，重复 ${sessionMerge.report.duplicates} 条，顺延 ${sessionMerge.report.shifted} 条，跳过 ${sessionMerge.report.skipped} 条；今日计划：新增 ${planMerge.report.added} 条，重复 ${planMerge.report.duplicates} 条，顺延 ${planMerge.report.shifted} 条，跳过 ${planMerge.report.skipped} 条；计划模板：新增 ${templateMerge.added} 个，重复 ${templateMerge.duplicates} 个；成绩记录：新增 ${examMerge.added} 条，重复 ${examMerge.duplicates} 条；复习项：新增 ${reviewMerge.added} 条，重复 ${reviewMerge.duplicates} 条。`,
+      `导入完成。时间记录：新增 ${merged.sessions.report.added} 条，重复 ${merged.sessions.report.duplicates} 条，顺延 ${merged.sessions.report.shifted} 条，跳过 ${merged.sessions.report.skipped} 条；今日计划：新增 ${merged.plans.report.added} 条，重复 ${merged.plans.report.duplicates} 条，顺延 ${merged.plans.report.shifted} 条，跳过 ${merged.plans.report.skipped} 条；计划模板：新增 ${merged.templates.added} 个，重复 ${merged.templates.duplicates} 个；成绩记录：新增 ${merged.exams.added} 条，重复 ${merged.exams.duplicates} 条；复习项：新增 ${merged.reviews.added} 条，重复 ${merged.reviews.duplicates} 条。`,
     );
   }
 
@@ -986,6 +977,8 @@ export default function Dashboard() {
       {backupMode && (
         <BackupDialog
           mode={backupMode}
+          state={state}
+          candidate={importCandidate}
           sessions={backupMode === "import" ? importCandidate?.sessions ?? [] : state.sessions}
           plans={backupMode === "import" ? importCandidate?.plans ?? [] : state.plans}
           onClose={() => { setBackupMode(null); setImportCandidate(null); }}

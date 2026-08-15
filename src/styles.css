@@ -1282,3 +1282,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   .backup-reminder-banner { flex-wrap: wrap; }
   .backup-reminder-banner > div { flex-basis: 100%; }
 }
+
+/* 导入预览(BackupDialog import 模式 dry-run 试算) */
+.import-preview { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.import-preview-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.import-preview-title strong { font-size: 12px; color: var(--text); }
+.import-preview-title span { font-size: 10px; color: var(--muted); }
+.import-preview-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.import-preview-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; line-height: 1.5; color: var(--text); }
+.import-preview-list span { flex: none; color: var(--accent); font-weight: 600; }
+.import-preview-list em { font-style: normal; color: var(--muted); text-align: right; }
+@media (max-width: 480px) {
+  .import-preview-list li { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .import-preview-list em { text-align: left; }
+}
