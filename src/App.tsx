@@ -1,73 +1,45 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
   BookOpen,
   CalendarDays,
-  Check,
-  ChevronRight,
-  CircleGauge,
   Clock3,
-  Copy,
-  HardDrive,
   Download,
-  FileUp,
-  FilterX,
+  HardDrive,
   Home,
   ListTodo,
   Moon,
   NotebookText,
-  Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Pencil,
-  Play,
-  Plus,
-  RotateCcw,
-  Save,
-  Search,
   Settings,
   SlidersHorizontal,
   Sun,
   Target,
   TimerReset,
-  Trash2,
   TrendingUp,
   Undo2,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { BackupDialog, PlanItemDialog, RecordDialog } from "./components/dialogs";
 import {
-  defaultStudyState,
-  defaultLifeActivities,
-  projectProgress,
-  subjectProgress,
-  type DailyPlan,
-  type Phase,
-  type PlanItem,
-  type PlanTemplate,
-  type ScoreWeights,
-  type StudySession,
-  type LifeActivity,
-  type StudyResource,
-  type StudyState,
-  type Subject,
-  type ThemeColors,
-  type WeeklyRuleMetric,
-} from "./study-state";
-import { applyThemePalette, COLOR_FIELDS, THEME_PALETTES } from "./theme-palettes";
-import {
-  benchmarkPhaseProgress,
-  benchmarkProjectProgress,
-  benchmarkSubjectProgress,
-  normalizeExperiences,
-} from "./experience-data";
-import ExperiencesView from "./ExperiencesView";
-import ExamsView from "./ExamsView";
-import ReviewView from "./ReviewView";
-import WeeklyInsights from "./WeeklyInsights";
-import TimerView, { type TimerLaunchRequest } from "./TimerView";
+  ACCOUNT_REGISTRY_KEY,
+  ACCOUNT_STATE_PREFIX,
+  LEGACY_LOCAL_KEY,
+  accountStateKey,
+  freshStudyState,
+  type AccountRegistry,
+  type DashboardAccount,
+} from "./lib/accounts";
+import { daysUntil, isInRange, localDate, recentDates } from "./lib/dates";
+import { downloadFile, minutesBetween } from "./lib/format";
+import { dailyMetrics, periodSummary, sessionsForDate } from "./lib/scoring";
+import type { BackupMode, RecordDraft, View } from "./lib/types";
+import { normalizeExperiences } from "./experience-data";
+import { mergeExamRecords, normalizeExamRecords } from "./exam-data";
+import { mergeReviewItems, normalizeReviewItems } from "./review-data";
 import {
   createScheduleArchive,
   mergeImportedPlans,
@@ -78,27 +50,30 @@ import {
   type DateRange,
   type ScheduleImportCandidate,
 } from "./schedule-data";
-import { findOverlappingPlanItems, scheduledTimeRange } from "./time-range";
-import { phaseForecast, recordPhaseProgress } from "./progress-forecast";
-import { mergeExamRecords, normalizeExamRecords } from "./exam-data";
-import { mergeReviewItems, normalizeReviewItems } from "./review-data";
-import { findOverlappingSessions } from "./session-time";
+import {
+  defaultLifeActivities,
+  defaultStudyState,
+  projectProgress,
+  subjectProgress,
+  type DailyPlan,
+  type PlanItem,
+  type StudySession,
+  type StudyState,
+} from "./study-state";
+import { applyThemePalette } from "./theme-palettes";
+import ExperiencesView from "./ExperiencesView";
+import ExamsView from "./ExamsView";
+import ReviewView from "./ReviewView";
+import TimerView, { type TimerLaunchRequest } from "./TimerView";
+import Overview from "./views/Overview";
+import RecordsView from "./views/RecordsView";
+import ScoringView from "./views/ScoringView";
+import SettingsView from "./views/SettingsView";
+import SubjectsView from "./views/SubjectsView";
+import TodayView from "./views/TodayView";
+import WeeklyView from "./views/WeeklyView";
 
-type View = "overview" | "today" | "timer" | "records" | "exams" | "reviews" | "subjects" | "experiences" | "weekly" | "scoring" | "settings";
 type SaveStatus = "loading" | "saving" | "saved";
-type BackupMode = "export" | "import";
-type DashboardAccount = {
-  id: string;
-  name: string;
-  createdAt: string;
-  lastActiveAt: string;
-};
-type AccountRegistry = {
-  version: 1;
-  activeAccountId: string;
-  accounts: DashboardAccount[];
-};
-type RecordDraft = Partial<Pick<StudySession, "date" | "start" | "end" | "subjectId" | "task" | "note">>;
 type UndoAction = {
   id: string;
   message: string;
@@ -119,48 +94,9 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "settings", label: "设置", icon: Settings },
 ];
 
-const SCORE_WEIGHT_FIELDS: { key: keyof ScoreWeights; label: string; detail: string }[] = [
-  { key: "duration", label: "有效时长", detail: "按作息折算后的学习时长" },
-  { key: "completion", label: "任务完成", detail: "按时长加权的完成度" },
-  { key: "focus", label: "专注质量", detail: "按时长加权的专注度" },
-  { key: "review", label: "复盘记录", detail: "有效复盘覆盖比例" },
-  { key: "timing", label: "学习时段", detail: "健康学习时段占比" },
-  { key: "sleep", label: "睡眠作息", detail: "7–9 小时为满分区间" },
-  { key: "exercise", label: "运动安排", detail: "时长与时段综合评价" },
-];
-
-const WEEKLY_METRICS: { value: WeeklyRuleMetric; label: string }[] = [
-  { value: "averageDailyScore", label: "记录日平均分" },
-  { value: "recordRate", label: "记录覆盖率" },
-  { value: "studyTarget", label: "学习目标达成率" },
-  { value: "healthySleepRate", label: "健康睡眠达标率" },
-  { value: "exerciseTarget", label: "运动目标达成率" },
-  { value: "routineBalance", label: "作息平衡" },
-];
-
-const RESOURCE_TYPES = [
-  { value: "book", label: "书本" },
-  { value: "chapter", label: "章节" },
-  { value: "paper", label: "试卷" },
-  { value: "exercise", label: "习题集" },
-  { value: "other", label: "其他" },
-] as const;
-
-const LEGACY_LOCAL_KEY = "kaoyan-dashboard-state-v1";
-const ACCOUNT_REGISTRY_KEY = "kaoyan-dashboard-accounts-v1";
-const ACCOUNT_STATE_PREFIX = "kaoyan-dashboard-account-state-v1:";
 const THEME_KEY = "kaoyan-dashboard-theme";
-const LIFE_ACTIVITIES = defaultLifeActivities;
-
-function accountStateKey(accountId: string) {
-  return `${ACCOUNT_STATE_PREFIX}${accountId}`;
-}
-
-function freshStudyState(name: string) {
-  const next = JSON.parse(JSON.stringify(defaultStudyState)) as StudyState;
-  next.profile.name = name;
-  return next;
-}
+const BACKUP_DISMISS_KEY = "kaoyan-dashboard-backup-dismissed-at";
+const BACKUP_REMINDER_DAYS = 7;
 
 function isAccountRegistry(value: unknown): value is AccountRegistry {
   if (!value || typeof value !== "object") return false;
@@ -307,310 +243,6 @@ function normalizeStudyState(value: unknown): StudyState | null {
   };
 }
 
-function lifeActivity(subjectId: string, activities: LifeActivity[] = LIFE_ACTIVITIES) {
-  return activities.find((item) => item.id === subjectId && item.active !== false);
-}
-
-function localDate(date = new Date()) {
-  const offset = date.getTimezoneOffset();
-  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
-}
-
-function minutesBetween(start: string, end: string, allowOvernight = false) {
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  const difference = eh * 60 + em - sh * 60 - sm;
-  if (allowOvernight && difference < 0) return difference + 24 * 60;
-  return Math.max(0, difference);
-}
-
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function minutesToTime(total: number) {
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function dateOffset(date: string, days: number) {
-  const value = new Date(`${date}T12:00:00`);
-  value.setDate(value.getDate() + days);
-  return localDate(value);
-}
-
-function presetRange(preset: "day" | "week" | "month", anchor: string): DateRange {
-  if (preset === "day") return { from: anchor, to: anchor };
-  const date = new Date(`${anchor}T12:00:00`);
-  if (preset === "week") {
-    const mondayOffset = (date.getDay() + 6) % 7;
-    const from = dateOffset(anchor, -mondayOffset);
-    return { from, to: dateOffset(from, 6) };
-  }
-  const from = `${anchor.slice(0, 7)}-01`;
-  const last = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  return { from, to: localDate(last) };
-}
-
-function isInRange(date: string, range: DateRange) {
-  return date >= range.from && date <= range.to;
-}
-
-function downloadFile(content: string, filename: string, type = "application/json") {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function clonePlanItems(items: PlanItem[]) {
-  return items.map((item) => ({ ...item, id: crypto.randomUUID() }));
-}
-
-function formatMinutes(minutes: number) {
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
-}
-
-function daysUntil(date: string) {
-  const target = new Date(`${date}T00:00:00`);
-  return Math.max(0, Math.ceil((target.getTime() - Date.now()) / 86_400_000));
-}
-
-function clampRatio(value: number) {
-  return Math.min(1, Math.max(0, value));
-}
-
-function studyTimeWeight(minute: number) {
-  if (minute < 5 * 60 + 30) return 0.15;
-  if (minute < 8 * 60) return 0.9;
-  if (minute < 12 * 60) return 1.05;
-  if (minute < 14 * 60) return 0.85;
-  if (minute < 18 * 60) return 1.05;
-  if (minute < 22 * 60 + 30) return 1;
-  if (minute < 23 * 60 + 30) return 0.7;
-  return 0.3;
-}
-
-function exerciseTimeWeight(minute: number) {
-  const morning = minute >= 6 * 60 && minute < 9 * 60;
-  const afternoon = minute >= 16 * 60 && minute < 20 * 60 + 30;
-  if (morning || afternoon) return 1;
-  if (
-    (minute >= 9 * 60 && minute < 11 * 60 + 30) ||
-    (minute >= 14 * 60 && minute < 16 * 60)
-  ) return 0.75;
-  if (minute >= 20 * 60 + 30 && minute < 22 * 60) return 0.6;
-  if (minute >= 23 * 60 + 30 || minute < 5 * 60 + 30) return 0;
-  return 0.35;
-}
-
-function sessionTimeWeight(session: StudySession, weightAt: (minute: number) => number) {
-  const duration = Math.min(24 * 60, Math.max(0, Math.round(session.actualMinutes)));
-  if (!duration) return 0;
-  const start = timeToMinutes(session.start);
-  let total = 0;
-  for (let offset = 0; offset < duration; offset += 1) {
-    total += weightAt((start + offset) % (24 * 60));
-  }
-  return total / duration;
-}
-
-function sleepQualityRatio(minutes: number) {
-  if (minutes >= 7 * 60 && minutes <= 9 * 60) return 1;
-  if (minutes < 7 * 60) return clampRatio((minutes - 5 * 60) / (2 * 60));
-  return clampRatio((11 * 60 - minutes) / (2 * 60));
-}
-
-function sessionMinutesMatching(session: StudySession, matches: (minute: number) => boolean) {
-  const duration = Math.min(24 * 60, Math.max(0, Math.round(session.actualMinutes)));
-  const start = timeToMinutes(session.start);
-  let total = 0;
-  for (let offset = 0; offset < duration; offset += 1) {
-    if (matches((start + offset) % (24 * 60))) total += 1;
-  }
-  return total;
-}
-
-function dailyMetrics(sessions: StudySession[], targetHours: number, weights: ScoreWeights, activities: LifeActivity[] = LIFE_ACTIVITIES) {
-  const activityIds = new Set(activities.map((activity) => activity.id));
-  const studySessions = sessions.filter((item) => !activityIds.has(item.subjectId));
-  const sleepSessions = sessions.filter((item) => item.subjectId === "sleep");
-  const exerciseSessions = sessions.filter((item) => item.subjectId === "exercise");
-  const actualMinutes = studySessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const weightedStudyMinutes = studySessions.reduce(
-    (sum, item) => sum + item.actualMinutes * sessionTimeWeight(item, studyTimeWeight),
-    0,
-  );
-  const completion = actualMinutes
-    ? studySessions.reduce((sum, item) => sum + item.completion * item.actualMinutes, 0) /
-      actualMinutes
-    : 0;
-  const focus = actualMinutes
-    ? studySessions.reduce((sum, item) => sum + item.focus * item.actualMinutes, 0) /
-      actualMinutes
-    : 0;
-  const review = actualMinutes
-    ? studySessions.reduce(
-        (sum, item) => sum + (item.note.trim().length >= 6 ? item.actualMinutes : 0),
-        0,
-      ) / actualMinutes
-    : 0;
-  const hourRatio = clampRatio(weightedStudyMinutes / Math.max(1, targetHours * 60));
-  const timingRatio = actualMinutes ? clampRatio(weightedStudyMinutes / actualMinutes) : 0;
-  const sleepMinutes = sleepSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const exerciseMinutes = exerciseSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const entertainmentMinutes = sessions
-    .filter((item) => item.subjectId === "entertainment")
-    .reduce((sum, item) => sum + item.actualMinutes, 0);
-  const lateStudyMinutes = studySessions.reduce(
-    (sum, item) => sum + sessionMinutesMatching(
-      item,
-      (minute) => minute >= 23 * 60 + 30 || minute < 5 * 60 + 30,
-    ),
-    0,
-  );
-  const exerciseTimingRatio = exerciseMinutes
-    ? exerciseSessions.reduce(
-        (sum, item) => sum + item.actualMinutes * sessionTimeWeight(item, exerciseTimeWeight),
-        0,
-      ) / exerciseMinutes
-    : 0;
-  const exerciseDurationRatio = exerciseMinutes < 30
-    ? exerciseMinutes / 30
-    : exerciseMinutes <= 90
-      ? 1
-      : Math.max(0.7, 1 - (exerciseMinutes - 90) / 200);
-  const componentRatios = {
-    duration: hourRatio,
-    completion: completion / 100,
-    focus: focus / 5,
-    review,
-    timing: timingRatio,
-    sleep: sleepQualityRatio(sleepMinutes),
-    exercise: exerciseDurationRatio * (0.7 + exerciseTimingRatio * 0.3),
-  };
-  const scoreParts = {
-    duration: componentRatios.duration * Math.max(0, weights.duration),
-    completion: componentRatios.completion * Math.max(0, weights.completion),
-    focus: componentRatios.focus * Math.max(0, weights.focus),
-    review: componentRatios.review * Math.max(0, weights.review),
-    timing: componentRatios.timing * Math.max(0, weights.timing),
-    sleep: componentRatios.sleep * Math.max(0, weights.sleep),
-    exercise: componentRatios.exercise * Math.max(0, weights.exercise),
-  };
-  const totalWeight = Object.values(weights).reduce((sum, value) => sum + Math.max(0, value), 0) || 1;
-  const score = Math.round(
-    Object.values(scoreParts).reduce((sum, value) => sum + value, 0) / totalWeight * 100,
-  );
-  return {
-    actualMinutes,
-    weightedStudyMinutes,
-    completion,
-    focus,
-    review,
-    timingRatio,
-    sleepMinutes,
-    exerciseMinutes,
-    entertainmentMinutes,
-    lateStudyMinutes,
-    scoreParts,
-    score,
-    hourRatio,
-    hasRecords: sessions.length > 0,
-  };
-}
-
-function sessionsForDate(sessions: StudySession[], date: string) {
-  return sessions.filter((item) => item.date === date).sort((a, b) => a.start.localeCompare(b.start));
-}
-
-function recentDates(days: number) {
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (days - 1 - index));
-    return localDate(date);
-  });
-}
-
-function periodSummary(
-  sessions: StudySession[],
-  dates: string[],
-  targetHours: number,
-  weights: ScoreWeights,
-  weeklyRules = defaultStudyState.scoring.weeklyRules,
-  activities: LifeActivity[] = LIFE_ACTIVITIES,
-) {
-  const days = dates.map((date) => dailyMetrics(sessionsForDate(sessions, date), targetHours, weights, activities));
-  const recordedDays = days.filter((item) => item.hasRecords);
-  const sleepDays = days.filter((item) => item.sleepMinutes > 0);
-  const averageDailyScore = recordedDays.length
-    ? recordedDays.reduce((sum, item) => sum + item.score, 0) / recordedDays.length
-    : 0;
-  const recordRate = recordedDays.length / Math.max(1, dates.length);
-  const healthySleepRate = sleepDays.length
-    ? sleepDays.filter((item) => item.sleepMinutes >= 7 * 60 && item.sleepMinutes <= 9 * 60).length /
-      sleepDays.length
-    : 0;
-  const exerciseMinutes = days.reduce((sum, item) => sum + item.exerciseMinutes, 0);
-  const exerciseTarget = dates.length / 7 * 150;
-  const averageEntertainmentMinutes = Math.round(
-    days.reduce((sum, item) => sum + item.entertainmentMinutes, 0) / Math.max(1, dates.length),
-  );
-  const totalStudyMinutes = days.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const lateStudyMinutes = days.reduce((sum, item) => sum + item.lateStudyMinutes, 0);
-  const entertainmentBalance = averageEntertainmentMinutes <= 120
-    ? 1
-    : clampRatio((240 - averageEntertainmentMinutes) / 120);
-  const lateStudyBalance = totalStudyMinutes
-    ? clampRatio(1 - lateStudyMinutes / totalStudyMinutes)
-    : 0;
-  const routineBalance =
-    healthySleepRate * 0.4 +
-    clampRatio(exerciseMinutes / Math.max(1, exerciseTarget)) * 0.3 +
-    entertainmentBalance * 0.15 +
-    lateStudyBalance * 0.15;
-  const metricRatios: Record<WeeklyRuleMetric, number> = {
-    averageDailyScore: clampRatio(averageDailyScore / 100),
-    recordRate,
-    studyTarget: clampRatio(totalStudyMinutes / Math.max(1, dates.length * targetHours * 60)),
-    healthySleepRate,
-    exerciseTarget: clampRatio(exerciseMinutes / Math.max(1, exerciseTarget)),
-    routineBalance,
-  };
-  const enabledRules = weeklyRules.filter((rule) => rule.enabled && rule.weight > 0);
-  const ruleWeight = enabledRules.reduce((sum, rule) => sum + rule.weight, 0) || 1;
-  const ruleResults = enabledRules.map((rule) => ({
-    ...rule,
-    ratio: metricRatios[rule.metric],
-    points: metricRatios[rule.metric] * rule.weight,
-  }));
-  const periodScore = Math.round(ruleResults.reduce((sum, rule) => sum + rule.points, 0) / ruleWeight * 100);
-  return {
-    days: dates.length,
-    periodScore,
-    averageDailyScore: Math.round(averageDailyScore),
-    recordRate,
-    averageSleepMinutes: sleepDays.length
-      ? Math.round(sleepDays.reduce((sum, item) => sum + item.sleepMinutes, 0) / sleepDays.length)
-      : 0,
-    healthySleepRate,
-    exerciseMinutes,
-    exerciseTarget: Math.round(exerciseTarget),
-    exerciseDays: days.filter((item) => item.exerciseMinutes >= 20).length,
-    averageEntertainmentMinutes,
-    totalStudyMinutes,
-    lateStudyMinutes,
-    routineBalance,
-    ruleResults,
-  };
-}
-
 export default function Dashboard() {
   const [state, setState] = useState<StudyState>(defaultStudyState);
   const [accounts, setAccounts] = useState<DashboardAccount[]>([]);
@@ -632,8 +264,24 @@ export default function Dashboard() {
   const [backupMode, setBackupMode] = useState<BackupMode | null>(null);
   const [importCandidate, setImportCandidate] = useState<ScheduleImportCandidate | null>(null);
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [backupReminderDismissedAt, setBackupReminderDismissedAt] = useState(() => {
+    try {
+      return window.localStorage.getItem(BACKUP_DISMISS_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const importRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<number | null>(null);
+  const stateRef = useRef(state);
+  const accountIdRef = useRef(activeAccountId);
+  const loadedRef = useRef(loaded);
+
+  useEffect(() => {
+    stateRef.current = state;
+    accountIdRef.current = activeAccountId;
+    loadedRef.current = loaded;
+  });
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(THEME_KEY);
@@ -725,6 +373,30 @@ export default function Dashboard() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [state, loaded, activeAccountId]);
+
+  // 防抖窗口(250ms)内关闭页面或切换标签页时,数据可能来不及写入。
+  // 在 beforeunload / visibilitychange(hidden) 时同步强制写一次,避免丢失最后几秒的编辑。
+  useEffect(() => {
+    function flushPendingSave() {
+      const current = stateRef.current;
+      const accountId = accountIdRef.current;
+      if (!loadedRef.current || !accountId || !current) return;
+      try {
+        window.localStorage.setItem(accountStateKey(accountId), JSON.stringify(current));
+      } catch {
+        // 存储空间不足等异常:保留上一次成功写入的快照即可。
+      }
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") flushPendingSave();
+    }
+    window.addEventListener("beforeunload", flushPendingSave);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("beforeunload", flushPendingSave);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loaded || !activeAccountId || !accounts.length) return;
@@ -1113,6 +785,30 @@ export default function Dashboard() {
   const viewTitle = NAV.find((item) => item.id === view)?.label ?? "总览";
   const activeAccount = accounts.find((account) => account.id === activeAccountId);
 
+  // 备份提醒:有实际数据、且超过 7 天未导出 JSON 时,在页面顶部提示(今日已手动关闭则不再显示)。
+  const backupTimestamp = state.dataSafety.lastExternalBackupAt;
+  const backupAgeDays = backupTimestamp ? Math.floor((Date.now() - new Date(backupTimestamp).getTime()) / 86_400_000) : null;
+  const hasBackupableData =
+    state.sessions.length > 0 ||
+    state.plans.length > 0 ||
+    state.examRecords.length > 0 ||
+    state.reviewItems.length > 0;
+  const backupOverdue = hasBackupableData && (backupAgeDays === null || backupAgeDays >= BACKUP_REMINDER_DAYS);
+  const dismissalFresh =
+    Boolean(backupReminderDismissedAt) &&
+    Date.now() - new Date(backupReminderDismissedAt).getTime() < 86_400_000;
+  const showBackupReminder = loaded && backupOverdue && !dismissalFresh && view !== "timer";
+
+  function dismissBackupReminder() {
+    const now = new Date().toISOString();
+    setBackupReminderDismissedAt(now);
+    try {
+      window.localStorage.setItem(BACKUP_DISMISS_KEY, now);
+    } catch {
+      // 忽略写入失败:下次进入页面时重新提醒即可。
+    }
+  }
+
   return (
     <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""} ${view === "timer" ? "timer-view" : ""}`}>
       {sidebarHidden && <button className="sidebar-reveal-toggle" type="button" onClick={() => setSidebarHidden(false)} aria-label="展开侧栏" title="展开侧栏"><PanelLeftOpen size={18} /></button>}
@@ -1185,6 +881,18 @@ export default function Dashboard() {
             </div>
           </div>
         </header>
+
+        {showBackupReminder && (
+          <div className="backup-reminder-banner" role="status">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>{backupAgeDays === null ? "还没有外部备份" : `外部备份已 ${backupAgeDays} 天未更新`}</strong>
+              <span>学习数据仅保存在当前浏览器。请定期导出 JSON 备份,更换设备或清理浏览器数据前务必先导出。</span>
+            </div>
+            <button type="button" className="primary-button" onClick={() => setBackupMode("export")}><Download size={15} />立即备份</button>
+            <button type="button" className="backup-reminder-dismiss" onClick={dismissBackupReminder} aria-label="今日不再提醒" title="今日不再提醒"><X size={15} /></button>
+          </div>
+        )}
 
         {view === "overview" && (
           <Overview
@@ -1288,1170 +996,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-function Overview({ state, todaySessions, metrics, progress, projectScore, days, onRecord, onNavigate }: {
-  state: StudyState;
-  todaySessions: StudySession[];
-  metrics: ReturnType<typeof dailyMetrics>;
-  progress: number;
-  projectScore: number;
-  days: number;
-  onRecord: () => void;
-  onNavigate: (view: View) => void;
-}) {
-  const today = localDate();
-  const phasePaces = state.subjects.flatMap((subject) => subject.phases.map((phase) => ({ subject, phase, forecast: phaseForecast(phase, today) })))
-    .filter((item) => item.forecast.configured)
-    .sort((a, b) => a.forecast.progressDelta - b.forecast.progressDelta)
-    .slice(0, 4);
-  return (
-    <div className="page-stack">
-      <section className="countdown-line"><CalendarDays size={19} /><span>距离暂定初试日期</span><strong>{days}</strong><span>天</span></section>
-      <section className="hero-grid">
-        <article className="metric-card score-card">
-          <div><p className="card-kicker">今日得分</p><strong className="mega-number">{metrics.score}</strong><p className="muted">综合学习质量、学习时段、睡眠和运动计算</p></div>
-          <ProgressRing value={metrics.score} label="/ 100" />
-        </article>
-        <article className="metric-card hours-card">
-          <p className="card-kicker">有效学习</p>
-          <div className="hours-value"><strong>{(metrics.actualMinutes / 60).toFixed(1)}</strong><span>h / 目标 {state.profile.dailyTargetHours}h</span></div>
-          <div className="progress-track"><i style={{ width: `${metrics.hourRatio * 100}%` }} /></div>
-          <p className="progress-caption">{Math.round(metrics.hourRatio * 100)}%</p>
-        </article>
-        <button className="record-cta" onClick={onRecord}>
-          <div className="cta-icon"><Plus size={28} /></div>
-          <div><span>快速记录</span><strong>记录当前时段</strong></div>
-          <ChevronRight size={24} />
-        </button>
-      </section>
-
-      <section className="content-grid">
-        <article className="panel timeline-panel">
-          <div className="panel-heading"><div><p className="card-kicker">今日执行</p><h2>时间线</h2></div><button className="text-button" onClick={() => onNavigate("records")}>查看全部 <ChevronRight size={15} /></button></div>
-          {todaySessions.length ? (
-            <div className="timeline-list">
-              {todaySessions.slice(0, 4).map((session) => (
-                <div className="timeline-item" key={session.id}>
-                  <span className="timeline-dot"><Check size={13} /></span>
-                  <time>{session.start}–{session.end}</time>
-                  <strong>{session.task}</strong>
-                  <span>{lifeActivity(session.subjectId, state.lifeActivities)?.name ?? `${session.completion}%`}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState icon={TimerReset} title="今天还没有学习记录" detail="先记录一个真实时段，评分会从第一条数据开始。" action="开始记录" onAction={onRecord} />
-          )}
-        </article>
-        <article className="panel breakdown-panel">
-          <div className="panel-heading"><div><p className="card-kicker">总进度评分</p><h2>项目健康度</h2></div><span className="score-badge">{projectScore}</span></div>
-          <ScoreRow label="考研总进度" value={progress} max={100} />
-          <ScoreRow label="今日执行" value={metrics.score} max={100} />
-          <ScoreRow label="科目启动" value={state.subjects.filter((s) => subjectProgress(s) > 0).length} max={state.subjects.length} />
-          <div className="formula-note"><CircleGauge size={16} />总评分 = 总进度 50% + 近7日 25% + 近30日 10% + 科目均衡 15%</div>
-        </article>
-      </section>
-
-      <section className="panel overview-pace-panel">
-        <div className="panel-heading"><div><p className="card-kicker">阶段速度</p><h2>现在快了还是慢了？</h2></div><button className="text-button" onClick={() => onNavigate("subjects")}>设置阶段目标 <ChevronRight size={15} /></button></div>
-        {phasePaces.length ? <div className="overview-pace-grid">{phasePaces.map(({ subject, phase, forecast }) => <button type="button" key={phase.id} onClick={() => onNavigate("subjects")}><span className="subject-indicator" style={{ background: subject.accent }} /><div><small>{subject.shortName}</small><strong>{phase.name}</strong><span>当前 {phase.progress}% · 应达 {forecast.expectedProgress}%</span></div><div className={forecast.progressDelta < 0 ? "behind" : "ahead"}><strong>{forecast.progressDelta < 0 ? `落后 ${Math.abs(forecast.progressDelta)}% ≈ ${Math.abs(forecast.scheduleDays)} 天` : `领先 ${forecast.progressDelta}% ≈ ${Math.abs(forecast.scheduleDays)} 天`}</strong><span>预计完成 {forecast.estimatedCompletionDate ?? "等待进度历史"}</span></div></button>)}</div> : <div className="schedule-empty">为阶段填写开始日期、截止日期与目标进度后，这里会优先显示最需要关注的阶段。</div>}
-      </section>
-
-      <InputOutputPanel state={state} onNavigate={onNavigate} />
-
-      <section className="subject-grid">
-        {state.subjects.map((subject) => {
-          const value = subjectProgress(subject);
-          return (
-            <button className="subject-card" key={subject.id} onClick={() => onNavigate("subjects")}>
-              <div className="subject-title"><div><span>{subject.shortName}</span><strong>{subject.name}</strong></div><BookOpen size={20} /></div>
-              <ProgressRing value={value} compact color={subject.accent} />
-              <p>{subject.note}</p>
-            </button>
-          );
-        })}
-      </section>
-    </div>
-  );
-}
-
-function InputOutputPanel({ state, onNavigate }: { state: StudyState; onNavigate: (view: View) => void }) {
-  const latestExam = [...state.examRecords].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-  if (!latestExam) return <section className="panel input-output-panel"><div className="panel-heading"><div><p className="card-kicker">投入 × 产出</p><h2>学习时长与成绩趋势</h2></div><button className="text-button" onClick={() => onNavigate("exams")}>记录第一套试卷 <ChevronRight size={15} /></button></div><div className="schedule-empty">记录真题或模考成绩后，这里会把对应科目的学习投入和正确率放在一起观察。</div></section>;
-  const subject = state.subjects.find((item) => item.id === latestExam.subjectId);
-  const dates = recentDates(14);
-  const inputValues = dates.map((date) => sessionsForDate(state.sessions, date).filter((session) => session.subjectId === latestExam.subjectId).reduce((sum, session) => sum + session.actualMinutes, 0));
-  const exams = state.examRecords.filter((record) => record.subjectId === latestExam.subjectId).sort((a, b) => a.date.localeCompare(b.date)).slice(-6);
-  const inputTotal = inputValues.slice(-7).reduce((sum, value) => sum + value, 0);
-  return <section className="panel input-output-panel"><div className="panel-heading"><div><p className="card-kicker">投入 × 产出 · {subject?.shortName ?? "科目"}</p><h2>学习时长与成绩趋势</h2></div><button className="text-button" onClick={() => onNavigate("exams")}>查看成绩模块 <ChevronRight size={15} /></button></div><div className="input-output-grid"><MiniTrend label="投入：近 7 天学习" value={`${(inputTotal / 60).toFixed(1)}h`} detail="曲线为近 14 天每日分钟数" values={inputValues} color="var(--accent)" /><MiniTrend label="产出：最近正确率" value={`${latestExam.correctRate}%`} detail={exams.map((exam) => `${exam.correctRate}%`).join(" → ")} values={exams.map((exam) => exam.correctRate)} color="var(--success)" /></div></section>;
-}
-
-function MiniTrend({ label, value, detail, values, color }: { label: string; value: string; detail: string; values: number[]; color: string }) {
-  const max = Math.max(1, ...values);
-  const points = values.map((item, index) => `${values.length === 1 ? 50 : index / (values.length - 1) * 100},${38 - item / max * 32}`).join(" ");
-  return <article className="mini-trend-card"><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="38" x2="100" y2="38" /><polyline points={points} style={{ stroke: color }} /></svg></article>;
-}
-
-function TodayView({ state, plan, sessions, metrics, planDate, onPlanDateChange, updateState, onAddPlan, onRecord, onStartPlan, onEditPlan, onEditSession, onDeleteSession, onDeletePlan }: {
-  state: StudyState;
-  plan: DailyPlan;
-  sessions: StudySession[];
-  metrics: ReturnType<typeof dailyMetrics>;
-  planDate: string;
-  onPlanDateChange: (date: string) => void;
-  updateState: (updater: (current: StudyState) => StudyState) => void;
-  onAddPlan: () => void;
-  onRecord: () => void;
-  onStartPlan: (item: PlanItem) => void;
-  onEditPlan: (item: PlanItem) => void;
-  onEditSession: (session: StudySession) => void;
-  onDeleteSession: (id: string) => void;
-  onDeletePlan: (id: string) => void;
-}) {
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const selectedTemplate = state.planTemplates.find((template) => template.id === selectedTemplateId)
-    ?? state.planTemplates[0];
-  const previousPlanDate = dateOffset(planDate, -1);
-  const previousPlan = state.plans.find((item) => item.date === previousPlanDate);
-  const plannedMinutes = plan.items.reduce(
-    (sum, item) => sum + minutesBetween(item.start, item.end, item.subjectId === "sleep"),
-    0,
-  );
-
-  function replaceTodayPlan(items: PlanItem[]) {
-    updateState((current) => ({
-      ...current,
-      plans: current.plans.some((item) => item.date === plan.date)
-        ? current.plans.map((item) => item.date === plan.date ? { ...item, items } : item)
-        : [...current.plans, { date: plan.date, items }],
-    }));
-  }
-
-  function saveAsTemplate() {
-    if (!plan.items.length) return;
-    const name = window.prompt("请输入模板名称，例如：高强度数学日");
-    if (!name?.trim()) return;
-    const template: PlanTemplate = { id: crypto.randomUUID(), name: name.trim(), items: clonePlanItems(plan.items) };
-    updateState((current) => ({ ...current, planTemplates: [...current.planTemplates, template] }));
-    setSelectedTemplateId(template.id);
-  }
-
-  function copyPreviousPlan() {
-    if (!previousPlan?.items.length) return;
-    if (plan.items.length && !window.confirm(`复制 ${previousPlanDate} 的计划会替换当前日期已有计划，是否继续？`)) return;
-    replaceTodayPlan(clonePlanItems(previousPlan.items));
-  }
-
-  function applyTemplate() {
-    if (!selectedTemplate) return;
-    if (plan.items.length && !window.confirm(`应用“${selectedTemplate.name}”会替换今天已有计划，是否继续？`)) return;
-    replaceTodayPlan(clonePlanItems(selectedTemplate.items));
-  }
-
-  function deleteTemplate() {
-    if (!selectedTemplate || !window.confirm(`确定删除计划模板“${selectedTemplate.name}”？`)) return;
-    updateState((current) => ({
-      ...current,
-      planTemplates: current.planTemplates.filter((template) => template.id !== selectedTemplate.id),
-    }));
-    setSelectedTemplateId("");
-  }
-
-  return (
-    <div className="page-stack narrow-page">
-      <section className="summary-strip today-summary">
-        <div><span>计划总时长</span><strong>{formatMinutes(plannedMinutes)}</strong></div>
-        <div><span>计划时段</span><strong>{plan.items.length}</strong></div>
-        <div><span>实际学习</span><strong>{formatMinutes(metrics.actualMinutes)}</strong></div>
-        <div><span>睡眠</span><strong>{formatMinutes(metrics.sleepMinutes)}</strong></div>
-        <div><span>运动</span><strong>{formatMinutes(metrics.exerciseMinutes)}</strong></div>
-        <div><span>今日得分</span><strong>{metrics.score}</strong></div>
-        <button className="primary-button" onClick={onAddPlan}><Plus size={17} />新增计划</button>
-      </section>
-      <div className="page-actions plan-actions">
-        <div className="plan-date-control"><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, -1))}>前一天</button><label><span>计划日期</span><input type="date" value={planDate} onChange={(event) => event.target.value && onPlanDateChange(event.target.value)} /></label><button className="secondary-button" onClick={() => onPlanDateChange(dateOffset(planDate, 1))}>后一天</button><button className="text-button" onClick={() => onPlanDateChange(localDate())}>回到今天</button></div>
-        <p className="muted">计划与实际记录按日期统一存储。</p>
-        <div className="button-row compact-buttons">
-          <button className="secondary-button" onClick={onRecord}><Clock3 size={16} />记录实际</button>
-          <button className="secondary-button" disabled={!previousPlan?.items.length} title={previousPlan?.items.length ? `复制 ${previousPlanDate} 的 ${previousPlan.items.length} 个时段` : `${previousPlanDate} 没有计划`} onClick={copyPreviousPlan}><Copy size={16} />复制前一天</button>
-          <button className="secondary-button" disabled={!plan.items.length} onClick={saveAsTemplate}><Save size={16} />保存为模板</button>
-        </div>
-      </div>
-      <section className="panel schedule-panel">
-        <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>{plan.date === localDate() ? "今日" : "当日"}计划安排图</h2></div><span className="muted">按计划时段生成</span></div>
-        <DayScheduleChart entries={plan.items} state={state} mode="planned" />
-        {plan.items.length > 0 && <><div className="schedule-table-divider" /><EditablePlanTable items={plan.items} sessions={state.sessions} state={state} canStart={planDate === localDate()} onStart={onStartPlan} onEdit={onEditPlan} onDelete={onDeletePlan} /></>}
-      </section>
-      <section className="panel template-panel">
-        <div className="panel-heading"><div><p className="card-kicker">可复用安排</p><h2>计划模板预览</h2></div><span className="muted">{state.planTemplates.length} 个模板</span></div>
-        {selectedTemplate ? (
-          <>
-            <div className="template-toolbar">
-              <label><span>选择模板</span><select value={selectedTemplate.id} onChange={(event) => setSelectedTemplateId(event.target.value)}>{state.planTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
-              <div><button className="primary-button" onClick={applyTemplate}>应用到今天</button><button className="danger-button" onClick={deleteTemplate}><Trash2 size={15} />删除模板</button></div>
-            </div>
-            <DayScheduleChart entries={selectedTemplate.items} state={state} mode="planned" />
-          </>
-        ) : (
-          <div className="schedule-empty">今天安排好计划后，点击“保存为模板”，即可在这里选择并预览。</div>
-        )}
-      </section>
-      <section className="panel">
-        <div className="panel-heading"><div><p className="card-kicker">{plan.date}</p><h2>当天的实际记录</h2></div><span className="muted">目标 {state.profile.dailyTargetHours} 小时</span></div>
-        {sessions.length ? <><DayScheduleChart entries={sessions} state={state} mode="actual" /><div className="schedule-table-divider" /><EditableSessionTable sessions={sessions} state={state} onEdit={onEditSession} onDelete={onDeleteSession} /></> : <EmptyState icon={Clock3} title="今天还没有实际记录" detail="执行计划后记录真实时段，计划图与实际图会分别保留。" action="记录第一个时段" onAction={onRecord} />}
-      </section>
-    </div>
-  );
-}
-
-function RecordsView({ state, onRecord, onEdit, onDelete }: {
-  state: StudyState;
-  onRecord: () => void;
-  onEdit: (session: StudySession) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [categoryId, setCategoryId] = useState("all");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const filteredSessions = state.sessions.filter((session) => {
-    if (categoryId !== "all" && session.subjectId !== categoryId) return false;
-    if (fromDate && session.date < fromDate) return false;
-    if (toDate && session.date > toDate) return false;
-    if (!normalizedQuery) return true;
-    const subject = state.subjects.find((item) => item.id === session.subjectId);
-    const activity = lifeActivity(session.subjectId, state.lifeActivities);
-    return [session.task, session.note, session.date, subject?.name, subject?.shortName, activity?.name]
-      .filter(Boolean)
-      .some((value) => String(value).toLocaleLowerCase().includes(normalizedQuery));
-  });
-  const dates = Array.from(new Set(filteredSessions.map((item) => item.date))).sort().reverse();
-  const filteredMinutes = filteredSessions.reduce((sum, item) => sum + item.actualMinutes, 0);
-  const hasFilters = Boolean(normalizedQuery || categoryId !== "all" || fromDate || toDate);
-
-  function clearFilters() {
-    setQuery("");
-    setCategoryId("all");
-    setFromDate("");
-    setToDate("");
-  }
-
-  return (
-    <div className="page-stack narrow-page">
-      <div className="page-actions">
-        <p className="muted">显示 {filteredSessions.length} / {state.sessions.length} 条 · 合计 {formatMinutes(filteredMinutes)}</p>
-        <div className="button-row compact-buttons">
-          <button className="primary-button" onClick={onRecord}><Plus size={17} />新增记录</button>
-        </div>
-      </div>
-      <section className="records-filter-panel" aria-label="筛选时间记录">
-        <label className="records-search"><span>搜索任务、备注或类别</span><div><Search size={16} /><input type="search" value={query} placeholder="例如：电路、真题、复盘" onChange={(event) => setQuery(event.target.value)} /></div></label>
-        <label><span>科目 / 活动</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="all">全部类别</option><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
-        <label><span>开始日期</span><input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} /></label>
-        <label><span>结束日期</span><input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} /></label>
-        <button type="button" className="secondary-button records-clear" disabled={!hasFilters} onClick={clearFilters}><FilterX size={16} />清除筛选</button>
-      </section>
-      {dates.length ? dates.map((date) => (
-        <section className="panel" key={date}>
-          <div className="panel-heading"><div><p className="card-kicker">{date}</p><h2>实际时间记录图</h2></div><strong>{formatMinutes(sessionsForDate(filteredSessions, date).reduce((sum, item) => sum + item.actualMinutes, 0))}</strong></div>
-          <DayScheduleChart entries={sessionsForDate(filteredSessions, date)} state={state} mode="actual" />
-          <div className="schedule-table-divider" />
-            <EditableSessionTable sessions={sessionsForDate(filteredSessions, date)} state={state} onEdit={onEdit} onDelete={onDelete} />
-        </section>
-      )) : <section className="panel">{state.sessions.length ? <EmptyState icon={Search} title="没有匹配的时间记录" detail="调整关键词、类别或日期范围后再试。" action="清除全部筛选" onAction={clearFilters} /> : <EmptyState icon={Clock3} title="记录会按日期沉淀在这里" detail="完成第一条记录后，可在这里查看全部历史。" action="新增记录" onAction={onRecord} />}</section>}
-    </div>
-  );
-}
-
-function SubjectsView({ state, updateState }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void }) {
-  const importRef = useRef<HTMLInputElement>(null);
-  const [editing, setEditing] = useState<{ subjectId: string; phaseId: string } | null>(null);
-  const today = localDate();
-  const fastestExperience = state.experiences.find((item) => item.id === state.fastestExperienceId);
-  const fastestProjectProgress = benchmarkProjectProgress(fastestExperience, state.subjects, today, state.profile.examDate);
-
-  function addPhase(subject: Subject) {
-    if (!window.confirm(`即将在“${subject.name}”中新增复习阶段。新增后会改变总进度的权重结构，是否继续？`)) return;
-    const phase: Phase = { id: crypto.randomUUID(), name: "新阶段", weight: 10, progress: 0, startDate: today, targetDate: state.profile.examDate, targetProgress: 100, progressHistory: [{ date: today, progress: 0 }], resources: [] };
-    updateState((current) => ({
-      ...current,
-      subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: [...item.phases, phase] } : item),
-    }));
-    setEditing({ subjectId: subject.id, phaseId: phase.id });
-  }
-
-  function exportSubjects() {
-    downloadFile(JSON.stringify({ kind: "kaoyan-subject-progress", version: 1, subjects: state.subjects }, null, 2), "科目进度配置.json");
-  }
-
-  function importSubjects(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as { subjects?: Subject[] };
-        if (!Array.isArray(parsed.subjects) || !parsed.subjects.every((subject) => subject.id && subject.name && Array.isArray(subject.phases))) throw new Error("invalid");
-        if (!window.confirm("导入会替换当前全部科目、阶段和资料进度，时间记录仍会保留。是否继续？")) return;
-        updateState((current) => ({
-          ...current,
-          subjects: parsed.subjects!.map((subject) => ({
-            ...subject,
-            phases: subject.phases.map((phase) => ({ ...phase, resources: Array.isArray(phase.resources) ? phase.resources : [] })),
-          })),
-        }));
-      } catch {
-        window.alert("无法导入：请选择由科目进度页面导出的 JSON 文件。");
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  return (
-    <div className="page-stack">
-      <section className="progress-hero panel">
-        <div>
-          <p className="card-kicker">加权总进度 · 动态对比</p>
-          <div className="project-comparison-values"><strong>{projectProgress(state.subjects)}%</strong><span>我的进度</span>{fastestProjectProgress !== null && <><strong className="fast-value">{fastestProjectProgress}%</strong><span>快线今日应达</span></>}</div>
-          <p className="muted">基准：{fastestExperience?.title ?? "未选择"}；按 {today} 与考试年份动态换算。阶段日期若为推断值，可在经验贴页核对来源标记。</p>
-        </div>
-        <div className="progress-hero-actions"><div className="ring-comparison"><ProgressRing value={projectProgress(state.subjects)} /><span>我 / 快线 {fastestProjectProgress ?? "—"}%</span></div><div className="button-row"><button className="secondary-button" onClick={exportSubjects}><Download size={16} />导出科目 JSON</button><button className="secondary-button" onClick={() => importRef.current?.click()}><FileUp size={16} />导入科目 JSON</button></div><input ref={importRef} hidden type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importSubjects(file); event.target.value = ""; }} /></div>
-      </section>
-      <section className="subject-detail-grid">
-        {state.subjects.map((subject) => {
-          const subjectBenchmark = benchmarkSubjectProgress(fastestExperience, subject, today, state.profile.examDate);
-          return (
-          <article className="panel subject-detail" key={subject.id}>
-            <div className="panel-heading"><div><p className="card-kicker">占总计划 {subject.weight}%</p><h2>{subject.name}</h2></div><div className="heading-actions"><div className="subject-comparison-badges"><span className="score-badge" style={{ color: subject.accent }}>我 {subjectProgress(subject)}%</span>{subjectBenchmark !== null && <span className="benchmark-badge">快线 {subjectBenchmark}%</span>}</div><button className="secondary-button" onClick={() => addPhase(subject)}><Plus size={15} />新增阶段</button></div></div>
-            <p className="subject-note">{subject.note}</p>
-            <div className="phase-list">
-              {subject.phases.map((phase) => {
-                const benchmark = benchmarkPhaseProgress(fastestExperience, subject.id, phase.id, today, state.profile.examDate);
-                const forecast = phaseForecast(phase, today);
-                const paceLabel = forecast.progressDelta < 0
-                  ? `落后 ${Math.abs(forecast.progressDelta)}% ≈ ${Math.abs(forecast.scheduleDays)} 天`
-                  : forecast.progressDelta > 0
-                    ? `领先 ${forecast.progressDelta}% ≈ ${Math.abs(forecast.scheduleDays)} 天`
-                    : "进度与计划一致";
-                return (
-                <div className="phase-entry" key={phase.id}>
-                <div className="phase-row comparison-row">
-                  <button className="phase-open" onClick={() => setEditing({ subjectId: subject.id, phaseId: phase.id })}><span>{phase.name}</span><small>阶段权重 {phase.weight}% · {phase.resources.length} 项资料</small></button>
-                  <div className="comparison-slider">
-                    <input aria-label={`${subject.name}${phase.name}我的进度`} type="range" min="0" max="100" value={phase.progress} onChange={(event) => {
-                      const value = Number(event.target.value);
-                      updateState((current) => ({ ...current, subjects: current.subjects.map((item) => item.id === subject.id ? { ...item, phases: item.phases.map((p) => p.id === phase.id ? recordPhaseProgress(p, value, today) : p) } : item) }));
-                    }} style={{
-                      "--range-color": subject.accent,
-                      "--range-progress": `${Math.min(100, Math.max(0, phase.progress))}%`,
-                    } as React.CSSProperties} />
-                    {benchmark !== null && <span className="benchmark-marker" style={{ left: `${benchmark}%` }} title={`快线今日应达 ${benchmark}%`} />}
-                    <div className="comparison-legend"><span style={{ color: subject.accent }}>我的 {phase.progress}%</span><span>快线 {benchmark ?? "—"}%</span></div>
-                  </div>
-                  <strong className={benchmark !== null && phase.progress < benchmark ? "behind" : "ahead"}>{benchmark === null ? "—" : `${phase.progress - benchmark >= 0 ? "+" : ""}${phase.progress - benchmark}`}</strong>
-                </div>
-                {forecast.configured && <div className="phase-pace-strip"><div><span>当前</span><strong>{phase.progress}%</strong></div><div><span>按计划应达</span><strong>{forecast.expectedProgress}%</strong></div><div className={forecast.progressDelta < 0 ? "behind" : "ahead"}><span>进度速度</span><strong>{paceLabel}</strong></div><div><span>按近 14 天速度预计</span><strong>{forecast.estimatedCompletionDate ?? "暂无足够历史"}</strong><small>{forecast.recentDailySpeed === null ? "至少跨两天记录进度" : `${forecast.recentDailySpeed.toFixed(1)}% / 天`}</small></div></div>}
-                </div>
-              )})}
-            </div>
-          </article>
-        )})}
-      </section>
-      {editing && <PhaseEditorDialog state={state} subjectId={editing.subjectId} phaseId={editing.phaseId} updateState={updateState} onClose={() => setEditing(null)} />}
-    </div>
-  );
-}
-
-function PhaseEditorDialog({ state, subjectId, phaseId, updateState, onClose }: {
-  state: StudyState;
-  subjectId: string;
-  phaseId: string;
-  updateState: (updater: (current: StudyState) => StudyState) => void;
-  onClose: () => void;
-}) {
-  const subject = state.subjects.find((item) => item.id === subjectId);
-  const phase = subject?.phases.find((item) => item.id === phaseId);
-  const [resourceForm, setResourceForm] = useState<{ type: StudyResource["type"]; name: string; detail: string }>({ type: "book", name: "", detail: "" });
-  if (!subject || !phase) return null;
-  const activeSubject = subject;
-  const activePhase = phase;
-  const forecast = phaseForecast(activePhase, localDate());
-
-  function updatePhase(changes: Partial<Subject["phases"][number]>) {
-    updateState((current) => ({
-      ...current,
-      subjects: current.subjects.map((item) => item.id === subjectId
-        ? { ...item, phases: item.phases.map((entry) => {
-            if (entry.id !== phaseId) return entry;
-            const next = { ...entry, ...changes };
-            return typeof changes.progress === "number" ? recordPhaseProgress(next, changes.progress, localDate()) : next;
-          }) }
-        : item),
-    }));
-  }
-
-  function updateResources(updater: (resources: StudyResource[]) => StudyResource[], syncProgress = false) {
-    const resources = updater(activePhase.resources);
-    const progress = syncProgress && resources.length
-      ? Math.round(resources.filter((resource) => resource.completed).length / resources.length * 100)
-      : activePhase.progress;
-    updatePhase({ resources, progress });
-  }
-
-  function addResource(event: React.FormEvent) {
-    event.preventDefault();
-    if (!resourceForm.name.trim()) return;
-    updateResources((resources) => [...resources, { id: crypto.randomUUID(), ...resourceForm, name: resourceForm.name.trim(), detail: resourceForm.detail.trim(), completed: false }], true);
-    setResourceForm({ ...resourceForm, name: "", detail: "" });
-  }
-
-  function deletePhase() {
-    if (!window.confirm(`确定删除“${activeSubject.name} / ${activePhase.name}”及其中的 ${activePhase.resources.length} 项资料？此操作无法撤销。`)) return;
-    updateState((current) => ({
-      ...current,
-      subjects: current.subjects.map((item) => item.id === subjectId ? { ...item, phases: item.phases.filter((entry) => entry.id !== phaseId) } : item),
-    }));
-    onClose();
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="phase-dialog" role="dialog" aria-modal="true" aria-label="编辑复习阶段">
-        <div className="dialog-heading"><div><p className="card-kicker">{subject.name}</p><h2>{phase.name}</h2></div><button onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
-        <div className="phase-editor-basics">
-          <label><span>阶段名称</span><input value={phase.name} onChange={(event) => updatePhase({ name: event.target.value })} /></label>
-          <label><span>阶段权重</span><input type="number" min="0" max="100" value={phase.weight} onChange={(event) => updatePhase({ weight: Math.max(0, Number(event.target.value)) })} /></label>
-          <label><span>当前进度：{phase.progress}%</span><input type="range" min="0" max="100" value={phase.progress} onChange={(event) => updatePhase({ progress: Number(event.target.value) })} /></label>
-        </div>
-        <div className="phase-schedule-fields">
-          <label><span>阶段开始日期</span><input type="date" value={phase.startDate ?? ""} max={phase.targetDate || undefined} onChange={(event) => updatePhase({ startDate: event.target.value || undefined })} /></label>
-          <label><span>目标截止日期</span><input type="date" value={phase.targetDate ?? ""} min={phase.startDate || undefined} onChange={(event) => updatePhase({ targetDate: event.target.value || undefined })} /></label>
-          <label><span>截止时目标进度</span><div className="target-progress-input"><input type="number" min="1" max="100" value={phase.targetProgress ?? 100} onChange={(event) => updatePhase({ targetProgress: Math.min(100, Math.max(1, Number(event.target.value) || 100)) })} /><span>%</span></div></label>
-          <div className={`phase-schedule-preview ${forecast.configured && forecast.progressDelta < 0 ? "behind" : ""}`}><span>今日节奏判断</span><strong>{forecast.configured ? `应达 ${forecast.expectedProgress}% · ${forecast.progressDelta >= 0 ? "领先" : "落后"} ${Math.abs(forecast.progressDelta)}%` : "填写开始与截止日期后计算"}</strong></div>
-        </div>
-        <div className="resource-heading"><div><p className="card-kicker">完成清单</p><h3>书本、章节、试卷与习题集</h3></div><span className="muted">完成勾选会自动同步阶段进度</span></div>
-        <form className="resource-add-form" onSubmit={addResource}>
-          <select value={resourceForm.type} onChange={(event) => setResourceForm({ ...resourceForm, type: event.target.value as StudyResource["type"] })}>{RESOURCE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select>
-          <input value={resourceForm.name} placeholder="名称，如《高等数学辅导讲义》" onChange={(event) => setResourceForm({ ...resourceForm, name: event.target.value })} />
-          <input value={resourceForm.detail} placeholder="章节、题量或完成要求" onChange={(event) => setResourceForm({ ...resourceForm, detail: event.target.value })} />
-          <button className="primary-button"><Plus size={16} />新增</button>
-        </form>
-        <div className="resource-list">
-          {phase.resources.map((resource) => (
-            <div className={`resource-row ${resource.completed ? "completed" : ""}`} key={resource.id}>
-              <input type="checkbox" checked={resource.completed} onChange={() => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, completed: !item.completed } : item), true)} />
-              <span className="resource-type">{RESOURCE_TYPES.find((type) => type.value === resource.type)?.label}</span>
-              <input value={resource.name} aria-label="资料名称" onChange={(event) => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, name: event.target.value } : item))} />
-              <input value={resource.detail} aria-label="资料要求" placeholder="完成要求" onChange={(event) => updateResources((resources) => resources.map((item) => item.id === resource.id ? { ...item, detail: event.target.value } : item))} />
-              <button onClick={() => updateResources((resources) => resources.filter((item) => item.id !== resource.id), true)} aria-label="删除资料"><Trash2 size={16} /></button>
-            </div>
-          ))}
-          {!phase.resources.length && <div className="schedule-empty">暂无资料，使用上方表单加入书本、章节、试卷或习题集。</div>}
-        </div>
-        <div className="dialog-footer"><button className="danger-button" onClick={deletePhase}><Trash2 size={16} />删除整个阶段</button><div><button className="primary-button" onClick={onClose}><Check size={16} />完成编辑</button></div></div>
-      </section>
-    </div>
-  );
-}
-
-function WeeklyView({ state, metrics, average, summary }: { state: StudyState; metrics: (ReturnType<typeof dailyMetrics> & { date: string })[]; average: number; summary: ReturnType<typeof periodSummary> }) {
-  const maxMinutes = Math.max(...metrics.map((item) => item.actualMinutes), state.profile.dailyTargetHours * 60);
-  const total = metrics.reduce((sum, item) => sum + item.actualMinutes, 0);
-  function exportMarkdown() {
-    const from = metrics[0]?.date ?? localDate();
-    const to = metrics.at(-1)?.date ?? localDate();
-    const dailyRows = metrics.map((item) => `| ${item.date} | ${(item.actualMinutes / 60).toFixed(1)}h | ${item.score} | ${formatMinutes(item.sleepMinutes)} | ${formatMinutes(item.exerciseMinutes)} |`).join("\n");
-    const ruleRows = summary.ruleResults.map((rule) => `| ${rule.name} | ${rule.weight} | ${Math.round(rule.ratio * 100)}% | ${(rule.points).toFixed(1)} |`).join("\n");
-    const subjectRows = state.subjects.map((subject) => `| ${subject.name} | ${subject.weight}% | ${subjectProgress(subject)}% |`).join("\n");
-    const markdown = `# ${state.profile.targetSchool}考研学习周报\n\n` +
-      `**周期：** ${from} 至 ${to}  \n**目标：** ${state.profile.targetDescription}  \n**周报得分：** ${summary.periodScore} / 100\n\n` +
-      `## 核心摘要\n\n- 有效学习：${formatMinutes(total)}\n- 活跃天数：${metrics.filter((item) => item.hasRecords).length} / 7\n- 日均得分：${average}\n- 平均睡眠：${formatMinutes(summary.averageSleepMinutes)}\n- 运动累计：${formatMinutes(summary.exerciseMinutes)}\n\n` +
-      `## 每日数据\n\n| 日期 | 有效学习 | 日得分 | 睡眠 | 运动 |\n|---|---:|---:|---:|---:|\n${dailyRows}\n\n` +
-      `## 自定义评分规则\n\n| 规则 | 权重 | 达成率 | 加权分 |\n|---|---:|---:|---:|\n${ruleRows || "| 暂无启用规则 | 0 | 0% | 0 |"}\n\n` +
-      `## 科目进度\n\n| 科目 | 总权重 | 当前进度 |\n|---|---:|---:|\n${subjectRows}\n\n---\n由考研项目管理台生成。\n`;
-    downloadFile(markdown, `考研周报-${from}-${to}.md`, "text/markdown;charset=utf-8");
-  }
-  return (
-    <div className="page-stack narrow-page">
-      <div className="page-actions"><p className="muted">周报按当前启用的自定义规则实时计算。</p><button className="primary-button" onClick={exportMarkdown}><Download size={17} />导出 Markdown 周报</button></div>
-      <section className="summary-strip weekly-summary">
-        <div><span>近7日有效学习</span><strong>{formatMinutes(total)}</strong></div>
-        <div><span>活跃天数</span><strong>{metrics.filter((item) => item.actualMinutes > 0).length} / 7</strong></div>
-        <div><span>平均日得分</span><strong>{average}</strong></div>
-        <div><span>周报得分</span><strong>{summary.periodScore}</strong></div>
-      </section>
-      <section className="panel chart-panel">
-        <div className="panel-heading"><div><p className="card-kicker">近 7 天</p><h2>有效学习时长</h2></div><span className="muted">目标线：{state.profile.dailyTargetHours}h</span></div>
-        <div className="bar-chart">
-          {metrics.map((item) => (
-            <div className="bar-column" key={item.date}>
-              <div className="bar-value">{item.actualMinutes ? (item.actualMinutes / 60).toFixed(1) : "0"}h</div>
-              <div className="bar-track"><i style={{ height: `${Math.max(2, (item.actualMinutes / maxMinutes) * 100)}%` }} /></div>
-              <span>{new Date(`${item.date}T00:00:00`).toLocaleDateString("zh-CN", { weekday: "short" })}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-      <WeeklyInsights state={state} from={metrics[0]?.date ?? localDate()} to={metrics.at(-1)?.date ?? localDate()} />
-      <section className="panel scoring-guide">
-        <div className="panel-heading"><div><p className="card-kicker">实时计算</p><h2>本周规则计分</h2></div><span className="score-badge">{summary.periodScore}</span></div>
-        <div className="guide-grid">{summary.ruleResults.map((rule) => <ScoreGuide key={rule.id} number={String(Math.round(rule.points))} title={`${rule.name} · 权重 ${rule.weight}`} detail={`${rule.description}；本周达成 ${Math.round(rule.ratio * 100)}%`} />)}</div>
-        {!summary.ruleResults.length && <div className="schedule-empty">尚未启用周报规则，请前往“评分标准”新增或启用规则。</div>}
-      </section>
-    </div>
-  );
-}
-
-function RoutinePeriodCard({ title, subtitle, summary }: {
-  title: string;
-  subtitle: string;
-  summary: ReturnType<typeof periodSummary>;
-}) {
-  return (
-    <article className="panel routine-period-card">
-      <div className="panel-heading">
-        <div><p className="card-kicker">{subtitle}</p><h2>{title}</h2></div>
-        <ProgressRing value={summary.periodScore} compact />
-      </div>
-      <div className="routine-metric-grid">
-        <div><span>记录覆盖</span><strong>{Math.round(summary.recordRate * 100)}%</strong></div>
-        <div><span>平均日得分</span><strong>{summary.averageDailyScore}</strong></div>
-        <div><span>平均睡眠</span><strong>{formatMinutes(summary.averageSleepMinutes)}</strong></div>
-        <div><span>达标睡眠</span><strong>{Math.round(summary.healthySleepRate * 100)}%</strong></div>
-        <div><span>运动累计</span><strong>{formatMinutes(summary.exerciseMinutes)}</strong></div>
-        <div><span>日均娱乐</span><strong>{formatMinutes(summary.averageEntertainmentMinutes)}</strong></div>
-        <div><span>深夜学习</span><strong>{formatMinutes(summary.lateStudyMinutes)}</strong></div>
-        <div><span>作息平衡</span><strong>{Math.round(summary.routineBalance * 100)}%</strong></div>
-      </div>
-    </article>
-  );
-}
-
-function ScoringView({ state, week, month, updateState }: {
-  state: StudyState;
-  week: ReturnType<typeof periodSummary>;
-  month: ReturnType<typeof periodSummary>;
-  updateState: (updater: (current: StudyState) => StudyState) => void;
-}) {
-  const totalWeight = Object.values(state.scoring.weights).reduce((sum, value) => sum + value, 0);
-  const totalWeeklyWeight = state.scoring.weeklyRules.filter((rule) => rule.enabled).reduce((sum, rule) => sum + rule.weight, 0);
-
-  function updateWeight(key: keyof ScoreWeights, value: number) {
-    updateState((current) => ({
-      ...current,
-      scoring: {
-        ...current.scoring,
-        weights: { ...current.scoring.weights, [key]: Math.max(0, value) },
-      },
-    }));
-  }
-
-  function updateWeeklyRule(id: string, changes: Partial<StudyState["scoring"]["weeklyRules"][number]>) {
-    updateState((current) => ({
-      ...current,
-      scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.map((rule) => rule.id === id ? { ...rule, ...changes } : rule) },
-    }));
-  }
-
-  function addWeeklyRule() {
-    updateState((current) => ({
-      ...current,
-      scoring: {
-        ...current.scoring,
-        weeklyRules: [...current.scoring.weeklyRules, { id: crypto.randomUUID(), name: "新评分规则", description: "自定义周报评价维度", metric: "studyTarget", weight: 10, enabled: true }],
-      },
-    }));
-  }
-
-  return (
-    <div className="page-stack scoring-page">
-      <section className="period-score-grid">
-        <RoutinePeriodCard title="近 7 天" subtitle="短期执行与恢复" summary={week} />
-        <RoutinePeriodCard title="近 30 天" subtitle="长期稳定性" summary={month} />
-      </section>
-
-      <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">周报模型</p><h2>自定义评分规则</h2></div><div className="heading-actions"><span className="muted">启用权重合计 {totalWeeklyWeight}</span><button className="primary-button" onClick={addWeeklyRule}><Plus size={16} />新增规则</button></div></div>
-        <p className="settings-copy">选择数据指标、设置名称与权重。系统会按所有启用规则的权重自动归一化为 100 分，新增规则会立即影响近 7 天和近 30 天得分。</p>
-        <div className="weekly-rule-list">
-          {state.scoring.weeklyRules.map((rule) => (
-            <article className={`weekly-rule-card ${rule.enabled ? "" : "disabled"}`} key={rule.id}>
-              <label className="rule-enabled"><input type="checkbox" checked={rule.enabled} onChange={(event) => updateWeeklyRule(rule.id, { enabled: event.target.checked })} /><span>启用</span></label>
-              <label><span>规则名称</span><input value={rule.name} onChange={(event) => updateWeeklyRule(rule.id, { name: event.target.value })} /></label>
-              <label><span>数据指标</span><select value={rule.metric} onChange={(event) => updateWeeklyRule(rule.id, { metric: event.target.value as WeeklyRuleMetric })}>{WEEKLY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}</select></label>
-              <label><span>权重</span><input type="number" min="0" max="100" value={rule.weight} onChange={(event) => updateWeeklyRule(rule.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
-              <label className="rule-description"><span>说明</span><input value={rule.description} onChange={(event) => updateWeeklyRule(rule.id, { description: event.target.value })} /></label>
-              <button className="rule-delete" onClick={() => window.confirm(`确定删除评分规则“${rule.name}”？`) && updateState((current) => ({ ...current, scoring: { ...current.scoring, weeklyRules: current.scoring.weeklyRules.filter((item) => item.id !== rule.id) } }))} aria-label="删除规则"><Trash2 size={16} /></button>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel standards-panel">
-        <div className="panel-heading"><div><p className="card-kicker">身心健康基线</p><h2>评判标准</h2></div><span className="score-badge">透明可调整</span></div>
-        <div className="standards-grid">
-          <article className="standard-card">
-            <span>01</span><div><strong>睡眠：每日 7–9 小时</strong><p>7–9 小时获得完整睡眠分；5–7 小时和 9–11 小时线性递减，超出范围为 0。近 7/30 天同时统计达标比例。</p><a href="https://www.cdc.gov/sleep/data-research/facts-stats/adults-sleep-facts-and-stats.html" target="_blank" rel="noreferrer">CDC 成人睡眠依据</a></div>
-          </article>
-          <article className="standard-card">
-            <span>02</span><div><strong>运动：每周至少 150 分钟</strong><p>单日 30–90 分钟较优；06:00–09:00 或 16:00–20:30 时段加权最高。近 30 天目标按每周 150 分钟等比例换算为约 {month.exerciseTarget} 分钟。</p><a href="https://www.who.int/news-room/fact-sheets/detail/physical-activity" target="_blank" rel="noreferrer">WHO 身体活动依据</a></div>
-          </article>
-          <article className="standard-card">
-            <span>03</span><div><strong>娱乐：日均不高于 2 小时</strong><p>这是本仪表盘的复习期平衡标准，并非医学阈值。0–120 分钟不扣周期平衡分，超过 120 分钟逐步降分，达到 240 分钟时该项为 0。</p></div>
-          </article>
-          <article className="standard-card">
-            <span>04</span><div><strong>学习：23:30 后降权</strong><p>08:00–12:00、14:00–18:00权重最高；正常晚间保持高权重；22:30 后逐步降低，23:30–05:30显著降权并计入深夜学习。</p></div>
-          </article>
-        </div>
-        <p className="standards-note">当前周期得分由上方启用的自定义周报规则计算；作息平衡指标综合睡眠达标、运动总量、娱乐时长与深夜学习占比。</p>
-      </section>
-
-      <section className="panel settings-card">
-        <div className="panel-heading">
-          <div><p className="card-kicker">个性化模型</p><h2>核心权重</h2></div>
-          <span className="muted">当前合计 {totalWeight}</span>
-        </div>
-        <p className="settings-copy">权重无需强制合计 100，系统会按当前总和自动归一化。调高某一项，会提高它在每日 100 分中的相对影响。</p>
-        <div className="score-weight-grid">
-          {SCORE_WEIGHT_FIELDS.map((field) => (
-            <label key={field.key}>
-              <span>{field.label}</span>
-              <small>{field.detail}</small>
-              <div><input type="number" min="0" max="100" value={state.scoring.weights[field.key]} onChange={(event) => updateWeight(field.key, Number(event.target.value))} /><em>权重</em></div>
-            </label>
-          ))}
-        </div>
-        <div className="button-row"><button type="button" className="secondary-button" onClick={() => updateState((current) => ({ ...current, scoring: defaultStudyState.scoring }))}><RotateCcw size={17} />恢复推荐权重</button></div>
-      </section>
-    </div>
-  );
-}
-
-function SettingsView({
-  state,
-  accounts,
-  activeAccountId,
-  updateState,
-  onSwitchAccount,
-  onAddAccount,
-  onRenameAccount,
-  onDeleteAccount,
-  lastSavedAt,
-  onExport,
-  onImport,
-  onReset,
-}: {
-  state: StudyState;
-  accounts: DashboardAccount[];
-  activeAccountId: string;
-  updateState: (updater: (current: StudyState) => StudyState) => void;
-  onSwitchAccount: (accountId: string) => void;
-  onAddAccount: (name: string) => boolean;
-  onRenameAccount: (accountId: string, name: string) => boolean;
-  onDeleteAccount: (accountId: string) => void;
-  lastSavedAt: string;
-  onExport: () => void;
-  onImport: () => void;
-  onReset: () => void;
-}) {
-  const [customMode, setCustomMode] = useState<"light" | "dark">("light");
-  const [newAccountName, setNewAccountName] = useState("");
-  const [accountNames, setAccountNames] = useState<Record<string, string>>({});
-  const backupTimestamp = state.dataSafety.lastExternalBackupAt;
-  const backupAgeDays = backupTimestamp ? Math.floor((Date.now() - new Date(backupTimestamp).getTime()) / 86_400_000) : null;
-  const backupNeedsAttention = backupAgeDays === null || backupAgeDays >= 7;
-  const dataVolume = state.sessions.length + state.plans.reduce((sum, plan) => sum + plan.items.length, 0) + state.examRecords.length + state.reviewItems.length;
-  const stateSizeKb = Math.max(1, Math.round(new Blob([JSON.stringify(state)]).size / 1024));
-  useEffect(() => {
-    setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name])));
-  }, [accounts]);
-  function addNewAccount(event: React.FormEvent) {
-    event.preventDefault();
-    if (onAddAccount(newAccountName)) setNewAccountName("");
-  }
-  function commitAccountName(account: DashboardAccount) {
-    const draft = accountNames[account.id] ?? account.name;
-    if (!onRenameAccount(account.id, draft)) {
-      setAccountNames((current) => ({ ...current, [account.id]: account.name }));
-    }
-  }
-  function updateProfile(key: keyof StudyState["profile"], value: string | number) {
-    updateState((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
-  }
-  function updateSubject(id: string, changes: Partial<Subject>) {
-    updateState((current) => ({ ...current, subjects: current.subjects.map((subject) => subject.id === id ? { ...subject, ...changes } : subject) }));
-  }
-  function updateLifeActivity(id: string, changes: Partial<LifeActivity>) {
-    updateState((current) => ({
-      ...current,
-      lifeActivities: current.lifeActivities.map((activity) => activity.id === id ? { ...activity, ...changes } : activity),
-    }));
-  }
-  function addSubject() {
-    const subject: Subject = { id: crypto.randomUUID(), name: "新考试科目", shortName: "新科目", weight: 0, accent: "#4f7ea8", note: "点击科目进度新增复习阶段", phases: [] };
-    updateState((current) => ({ ...current, subjects: [...current.subjects, subject] }));
-  }
-  function addLifeActivity() {
-    const activity: LifeActivity = { id: `life-${crypto.randomUUID()}`, name: "新生活活动", accent: "#6287a8" };
-    updateState((current) => ({ ...current, lifeActivities: [...current.lifeActivities, activity] }));
-  }
-  function deleteLifeActivity(activity: LifeActivity) {
-    const referenced = state.sessions.some((session) => session.subjectId === activity.id)
-      || state.plans.some((plan) => plan.items.some((item) => item.subjectId === activity.id))
-      || state.planTemplates.some((template) => template.items.some((item) => item.subjectId === activity.id));
-    if (!window.confirm(referenced
-      ? `“${activity.name}”已有记录或计划，删除后会从新增下拉框隐藏，历史数据仍会保留。确定继续吗？`
-      : `确定删除生活活动“${activity.name}”？`)) return;
-    updateState((current) => ({
-      ...current,
-      lifeActivities: referenced
-        ? current.lifeActivities.map((item) => item.id === activity.id ? { ...item, active: false } : item)
-        : current.lifeActivities.filter((item) => item.id !== activity.id),
-    }));
-  }
-  function updateCustomColor(key: keyof ThemeColors, value: string) {
-    updateState((current) => ({
-      ...current,
-      appearance: {
-        ...current.appearance,
-        paletteId: "custom",
-        [customMode === "light" ? "customLight" : "customDark"]: {
-          ...(customMode === "light" ? current.appearance.customLight : current.appearance.customDark),
-          [key]: value,
-        },
-      },
-    }));
-  }
-  function uploadSidebarIcon(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      window.alert("请选择 PNG、JPG、WEBP 或 SVG 图片。");
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      window.alert("图标图片不能超过 2 MB。");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => updateProfile("sidebarIcon", String(reader.result));
-    reader.readAsDataURL(file);
-  }
-  return (
-    <div className="page-stack settings-page">
-      <section className="panel settings-card account-settings-card">
-        <div className="panel-heading">
-          <div><p className="card-kicker">研友空间</p><h2>账号管理</h2></div>
-          <div className="account-count"><Users size={18} /><span>{accounts.length} 个账号</span></div>
-        </div>
-        <p className="settings-copy">每个账号拥有完全独立的目标、科目、计划和时间记录。顶部可随时快速切换，页面只会显示当前账号的数据，适合在同一台设备上轮流记录和监督进度。</p>
-        <form className="account-add-form" onSubmit={addNewAccount}>
-          <label>
-            <span>新增研友账号</span>
-            <input
-              value={newAccountName}
-              maxLength={30}
-              placeholder="输入姓名或昵称"
-              onChange={(event) => setNewAccountName(event.target.value)}
-            />
-          </label>
-          <button className="primary-button" type="submit"><UserPlus size={17} />新增并切换</button>
-        </form>
-        <div className="account-list">
-          {accounts.map((account) => {
-            const active = account.id === activeAccountId;
-            return (
-              <article className={active ? "active" : ""} key={account.id}>
-                <div className="account-avatar" aria-hidden="true">
-                  {(accountNames[account.id] ?? account.name).trim().slice(0, 1).toLocaleUpperCase() || "研"}
-                </div>
-                <label>
-                  <span>账号名称</span>
-                  <input
-                    value={accountNames[account.id] ?? account.name}
-                    maxLength={30}
-                    onChange={(event) => setAccountNames((current) => ({
-                      ...current,
-                      [account.id]: event.target.value,
-                    }))}
-                    onBlur={() => commitAccountName(account)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                    }}
-                  />
-                </label>
-                <div className="account-meta">
-                  {active
-                    ? <strong>当前账号</strong>
-                    : <span>上次切换 {new Date(account.lastActiveAt).toLocaleDateString("zh-CN")}</span>}
-                </div>
-                <div className="account-actions">
-                  {!active && <button type="button" className="secondary-button" onClick={() => onSwitchAccount(account.id)}>切换</button>}
-                  {!active && <button type="button" className="danger-button" onClick={() => onDeleteAccount(account.id)}><Trash2 size={15} />删除</button>}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-      <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">项目基线</p><h2>考研目标</h2></div><Save size={19} /></div>
-        <div className="form-grid">
-          <label><span>称呼</span><input value={state.profile.name} onChange={(e) => updateProfile("name", e.target.value)} /></label>
-          <label className="wide"><span>目标项目</span><input value={state.profile.target} onChange={(e) => updateProfile("target", e.target.value)} /></label>
-          <label><span>侧栏主标题</span><input value={state.profile.sidebarTitle} onChange={(e) => updateProfile("sidebarTitle", e.target.value)} /></label>
-          <label className="wide"><span>侧栏副标题</span><input value={state.profile.sidebarSubtitle} onChange={(e) => updateProfile("sidebarSubtitle", e.target.value)} /></label>
-          <div className="wide sidebar-icon-setting">
-            <div><span className="field-label">侧栏图标</span><p className="settings-copy">上传后会保存在本机浏览器，并替换左侧标题旁的 Z 图标。</p></div>
-            <div className="sidebar-icon-actions">
-              <div className="sidebar-icon-preview">{state.profile.sidebarIcon ? <img src={state.profile.sidebarIcon} alt="当前侧栏图标" /> : "Z"}</div>
-              <label className="secondary-button file-button"><FileUp size={16} />上传图标<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={uploadSidebarIcon} /></label>
-              {state.profile.sidebarIcon && <button type="button" className="danger-button" onClick={() => updateProfile("sidebarIcon", "")}>恢复 Z</button>}
-            </div>
-          </div>
-          <label><span>目标院校</span><input value={state.profile.targetSchool} onChange={(e) => updateProfile("targetSchool", e.target.value)} /></label>
-          <label className="wide"><span>目标说明</span><input value={state.profile.targetDescription} onChange={(e) => updateProfile("targetDescription", e.target.value)} /></label>
-          <label><span>暂定初试日期</span><input type="date" value={state.profile.examDate} onChange={(e) => updateProfile("examDate", e.target.value)} /></label>
-          <label><span>每日目标小时</span><input type="number" min="1" max="16" step="0.5" value={state.profile.dailyTargetHours} onChange={(e) => updateProfile("dailyTargetHours", Number(e.target.value))} /></label>
-          <label><span>目标起床</span><input type="time" value={state.profile.wakeTime} onChange={(e) => updateProfile("wakeTime", e.target.value)} /></label>
-          <label><span>目标睡觉</span><input type="time" value={state.profile.sleepTime} onChange={(e) => updateProfile("sleepTime", e.target.value)} /></label>
-        </div>
-      </section>
-      <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">考试配置</p><h2>考试科目与总进度权重</h2></div><div className="heading-actions"><span className="muted">合计 {state.subjects.reduce((sum, subject) => sum + subject.weight, 0)}%</span><button className="primary-button" onClick={addSubject}><Plus size={16} />新增科目</button></div></div>
-        <div className="subject-settings-list">{state.subjects.map((subject) => <article key={subject.id}>
-          <label><span>科目名称</span><input value={subject.name} onChange={(event) => updateSubject(subject.id, { name: event.target.value })} /></label>
-          <label><span>简称</span><input value={subject.shortName} onChange={(event) => updateSubject(subject.id, { shortName: event.target.value })} /></label>
-          <label><span>权重</span><input type="number" min="0" max="100" value={subject.weight} onChange={(event) => updateSubject(subject.id, { weight: Math.max(0, Number(event.target.value)) })} /></label>
-          <label><span>科目颜色</span><input type="color" value={subject.accent} onChange={(event) => updateSubject(subject.id, { accent: event.target.value })} /></label>
-          <label className="subject-note-field"><span>科目说明</span><input value={subject.note} onChange={(event) => updateSubject(subject.id, { note: event.target.value })} /></label>
-          <button onClick={() => window.confirm(`确定删除考试科目“${subject.name}”？对应阶段会一起删除，已有时间记录不会自动删除。`) && updateState((current) => ({ ...current, subjects: current.subjects.filter((item) => item.id !== subject.id) }))} aria-label="删除科目"><Trash2 size={16} /></button>
-        </article>)}</div>
-      </section>
-      <section className="panel settings-card">
-        <div className="panel-heading"><div><p className="card-kicker">生活安排</p><h2>生活活动管理</h2></div><div className="heading-actions"><span className="muted">{state.lifeActivities.filter((activity) => activity.active !== false).length} 个活动</span><button className="primary-button" type="button" onClick={addLifeActivity}><Plus size={16} />新增活动</button></div></div>
-        <p className="settings-copy">生活活动会出现在计划和时间记录的“科目 / 活动”下拉框中，不会计入有效学习时长。删除已有数据使用过的活动时，历史记录会保留但该活动会从新增列表隐藏。</p>
-        <div className="life-activity-settings-list">
-          {state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <article key={activity.id}>
-            <span className="activity-color-dot" style={{ background: activity.accent }} />
-            <label><span>活动名称</span><input value={activity.name} onChange={(event) => updateLifeActivity(activity.id, { name: event.target.value })} /></label>
-            <label><span>活动颜色</span><input type="color" value={activity.accent} onChange={(event) => updateLifeActivity(activity.id, { accent: event.target.value })} /></label>
-            <button type="button" className="rule-delete" onClick={() => deleteLifeActivity(activity)} aria-label={`删除生活活动${activity.name}`}><Trash2 size={16} /></button>
-          </article>)}
-          {!state.lifeActivities.some((activity) => activity.active !== false) && <div className="schedule-empty">还没有生活活动，点击“新增活动”开始配置。</div>}
-        </div>
-      </section>
-      <section className="panel settings-card appearance-settings">
-        <div className="panel-heading"><div><p className="card-kicker">视觉外观</p><h2>页面配色方案</h2></div><Palette size={20} /></div>
-        <p className="settings-copy">六套方案均分别设计了亮色与暗色版本，侧栏的模式开关会自动使用对应配色。也可以进入自定义调色盘逐项调整。</p>
-        <div className="palette-grid">
-          {THEME_PALETTES.map((palette) => <button className={state.appearance.paletteId === palette.id ? "active" : ""} key={palette.id} onClick={() => updateState((current) => ({ ...current, appearance: { ...current.appearance, paletteId: palette.id } }))}><span className="palette-swatches"><i style={{ background: palette.light.primary }} /><i style={{ background: palette.light.accent }} /><i style={{ background: palette.dark.bg }} /><i style={{ background: palette.dark.accent }} /></span><strong>{palette.name}</strong><small>{palette.description}</small></button>)}
-          <button className={state.appearance.paletteId === "custom" ? "active custom" : "custom"} onClick={() => updateState((current) => ({ ...current, appearance: { ...current.appearance, paletteId: "custom" } }))}><span className="palette-swatches custom-wheel"><Palette size={22} /></span><strong>自定义调色盘</strong><small>独立调节亮色与暗色的全部关键颜色</small></button>
-        </div>
-        {state.appearance.paletteId === "custom" && <div className="custom-palette-editor">
-          <div className="mode-tabs"><button className={customMode === "light" ? "active" : ""} onClick={() => setCustomMode("light")}><Sun size={15} />亮色配色</button><button className={customMode === "dark" ? "active" : ""} onClick={() => setCustomMode("dark")}><Moon size={15} />暗色配色</button></div>
-          <div className="color-picker-grid">{COLOR_FIELDS.map((field) => { const colors = customMode === "light" ? state.appearance.customLight : state.appearance.customDark; return <label key={field.key}><span>{field.label}</span><div><input type="color" value={colors[field.key]} onChange={(event) => updateCustomColor(field.key, event.target.value)} /><code>{colors[field.key]}</code></div></label>; })}</div>
-          <div className="button-row"><button className="secondary-button" onClick={() => updateState((current) => ({ ...current, appearance: { ...defaultStudyState.appearance, paletteId: "custom" } }))}><RotateCcw size={16} />重置自定义配色</button></div>
-        </div>}
-      </section>
-      <section className="panel settings-card data-safety-card">
-        <div className="panel-heading"><div><p className="card-kicker">数据安全中心</p><h2>本机存储与外部备份</h2></div><HardDrive size={19} /></div>
-        <p className="settings-copy">自动保存只保护当前浏览器里的副本；JSON 下载才是可迁移、可恢复的外部备份。</p>
-        <div className="data-safety-grid">
-          <article className="positive"><span>最近自动保存</span><strong>{lastSavedAt ? (Date.now() - new Date(lastSavedAt).getTime() < 60_000 ? "刚刚" : new Date(lastSavedAt).toLocaleString("zh-CN")) : "正在读取"}</strong><small>当前账号 · 浏览器本机</small></article>
-          <article className={backupNeedsAttention ? "negative" : "positive"}><span>最近外部备份</span><strong>{backupTimestamp ? (backupAgeDays === 0 ? "今天" : `${backupAgeDays} 天前`) : "从未备份"}</strong><small>{backupTimestamp ? new Date(backupTimestamp).toLocaleString("zh-CN") : "请立即导出一个 JSON 文件"}</small></article>
-          <article><span>数据条目</span><strong>{dataVolume}</strong><small>时间、计划、成绩与复习项</small></article>
-          <article><span>本机数据量</span><strong>{stateSizeKb} KB</strong><small>{state.subjects.length} 科目 · {state.experiences.length} 篇经验</small></article>
-        </div>
-        {backupNeedsAttention && <div className="backup-warning"><AlertTriangle size={18} /><div><strong>{backupAgeDays === null ? "还没有外部备份" : `外部备份已经 ${backupAgeDays} 天未更新`}</strong><span>清除浏览器数据、更换设备或浏览器故障都可能导致本机副本丢失。</span></div></div>}
-        <div className="button-row"><button className="primary-button" onClick={onExport}><Download size={17} />立即备份</button><button className="secondary-button" onClick={onImport}><FileUp size={17} />导入备份</button><button className="danger-button" onClick={onReset}><RotateCcw size={17} />恢复初始数据</button></div>
-      </section>
-    </div>
-  );
-}
-
-function BackupDialog({ mode, sessions, plans, onClose, onConfirm }: {
-  mode: BackupMode;
-  sessions: StudySession[];
-  plans: DailyPlan[];
-  onClose: () => void;
-  onConfirm: (range: DateRange) => void;
-}) {
-  const dates = [...sessions.map((item) => item.date), ...plans.map((item) => item.date)].sort();
-  const firstDate = dates[0] ?? localDate();
-  const lastDate = dates.at(-1) ?? localDate();
-  const [anchor, setAnchor] = useState(lastDate);
-  const [range, setRange] = useState<DateRange>(() =>
-    mode === "import" ? { from: firstDate, to: lastDate } : presetRange("week", lastDate),
-  );
-  const sessionCount = sessions.filter((item) => isInRange(item.date, range)).length;
-  const planCount = plans
-    .filter((item) => isInRange(item.date, range))
-    .reduce((sum, item) => sum + item.items.length, 0);
-  const invalid = !range.from || !range.to || range.from > range.to;
-
-  function applyPreset(preset: "day" | "week" | "month") {
-    setRange(presetRange(preset, anchor));
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="backup-dialog" role="dialog" aria-modal="true" aria-label={mode === "export" ? "导出数据" : "导入数据"}>
-        <div className="dialog-heading">
-          <div><p className="card-kicker">按日期管理备份</p><h2>{mode === "export" ? "选择导出范围" : "选择导入范围"}</h2></div>
-          <button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button>
-        </div>
-        <div className="backup-content">
-          <label className="anchor-field"><span>定位日期</span><input type="date" value={anchor} onChange={(event) => setAnchor(event.target.value)} /></label>
-          <div className="range-presets" aria-label="快捷日期范围">
-            <button type="button" onClick={() => applyPreset("day")}>一天</button>
-            <button type="button" onClick={() => applyPreset("week")}>一星期</button>
-            <button type="button" onClick={() => applyPreset("month")}>一个月</button>
-            {mode === "import" && <button type="button" onClick={() => setRange({ from: firstDate, to: lastDate })}>文件全部</button>}
-          </div>
-          <div className="date-range-fields">
-            <label><span>开始日期</span><input type="date" value={range.from} onChange={(event) => setRange({ ...range, from: event.target.value })} /></label>
-            <span>至</span>
-            <label><span>结束日期</span><input type="date" value={range.to} onChange={(event) => setRange({ ...range, to: event.target.value })} /></label>
-          </div>
-          <div className="range-summary">
-            <CalendarDays size={19} />
-            <div><strong>{invalid ? "日期范围无效" : `${range.from} 至 ${range.to}`}</strong><span>范围内共有 {sessionCount} 条时间记录和 {planCount} 个计划时段，最小选择精度为一天。</span></div>
-          </div>
-          {mode === "import" && (
-            <div className="conflict-policy">
-              <strong>导入冲突规则</strong>
-              <p>时间记录和今日计划都会按日期、起止时间及任务名称查重；不同任务的时段重叠时，导入项按原时长顺延到当天最早空闲时段，并写入调整备注，不覆盖已有数据。</p>
-            </div>
-          )}
-        </div>
-        <div className="dialog-footer">
-          <span>{mode === "export" ? "一个 JSON 文件包含项目设置、科目进度、所选日期的计划与时间记录。" : "合并所选日期的计划与时间记录，不改动项目设置和科目进度。"}</span>
-          <div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="button" className="primary-button" disabled={invalid} onClick={() => onConfirm(range)}>{mode === "export" ? <Download size={17} /> : <FileUp size={17} />}{mode === "export" ? "导出 JSON" : "合并导入"}</button></div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function RecordDialog({ state, initial, draft, onClose, onSave }: { state: StudyState; initial: StudySession | null; draft: RecordDraft | null; onClose: () => void; onSave: (session: StudySession) => void }) {
-  const now = new Date();
-  const end = `${String(now.getHours()).padStart(2, "0")}:${String(Math.floor(now.getMinutes() / 5) * 5).padStart(2, "0")}`;
-  const startDate = new Date(now.getTime() - 90 * 60_000);
-  const start = `${String(startDate.getHours()).padStart(2, "0")}:${String(Math.floor(startDate.getMinutes() / 5) * 5).padStart(2, "0")}`;
-  const [form, setForm] = useState(() => initial ? {
-    date: initial.date,
-    start: initial.start,
-    end: initial.end,
-    subjectId: initial.subjectId,
-    task: initial.task,
-    completion: initial.completion,
-    focus: initial.focus,
-    note: initial.note,
-  } : { date: draft?.date ?? localDate(), start: draft?.start ?? start, end: draft?.end ?? end, subjectId: draft?.subjectId ?? "math", task: draft?.task ?? "", completion: 100, focus: 4, note: draft?.note ?? "" });
-  const selectedActivity = lifeActivity(form.subjectId, state.lifeActivities);
-  const isLifeActivity = Boolean(selectedActivity);
-  const plannedMinutes = minutesBetween(form.start, form.end, form.subjectId === "sleep");
-  const rangeStart = new Date(`${form.date}T${form.start}:00`).getTime();
-  const hasValidRange = Boolean(form.date && form.start && form.end) && Number.isFinite(rangeStart) && plannedMinutes > 0;
-  const conflicts = hasValidRange
-    ? findOverlappingSessions(
-      { start: rangeStart, end: rangeStart + plannedMinutes * 60_000 },
-      state.sessions,
-      initial ? new Set([initial.id]) : new Set(),
-    )
-    : [];
-  function changeCategory(subjectId: string) {
-    const previousActivity = lifeActivity(form.subjectId, state.lifeActivities);
-    const nextActivity = lifeActivity(subjectId, state.lifeActivities);
-    const canAutofill = !form.task.trim() || form.task === previousActivity?.name;
-    setForm({ ...form, subjectId, task: nextActivity && canAutofill ? nextActivity.name : form.task });
-  }
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!form.task.trim() || !hasValidRange || conflicts.length) return;
-    onSave({
-      id: initial?.id ?? crypto.randomUUID(),
-      planItemId: initial?.planItemId,
-      ...form,
-      task: form.task.trim(),
-      plannedMinutes,
-      actualMinutes: plannedMinutes,
-    });
-  }
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">分时记录</p><h2>{initial ? "编辑时间记录" : draft?.task ? "记录计划完成情况" : "记录一个时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
-        <div className="dialog-grid">
-          <label><span>日期</span><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(e) => changeCategory(e.target.value)}><optgroup label="学习科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
-          <label><span>开始时间</span><input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></label>
-          <label><span>结束时间</span><input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} /></label>
-          <label className="wide"><span>{isLifeActivity ? "活动内容" : "本时段任务"}</span><input autoFocus placeholder={isLifeActivity ? `例如：${selectedActivity?.name}` : "例如：1000题概率统计第1章"} value={form.task} onChange={(e) => setForm({ ...form, task: e.target.value })} /></label>
-          {!isLifeActivity && <label><span>完成度：{form.completion}%</span><input type="range" min="0" max="100" step="5" value={form.completion} onChange={(e) => setForm({ ...form, completion: Number(e.target.value) })} /></label>}
-          {!isLifeActivity && <label><span>专注度：{form.focus} / 5</span><input type="range" min="1" max="5" value={form.focus} onChange={(e) => setForm({ ...form, focus: Number(e.target.value) })} /></label>}
-          <label className="wide"><span>{isLifeActivity ? "备注（可选）" : "复盘（可选）"}</span><textarea placeholder={isLifeActivity ? "例如：睡眠质量、运动内容或娱乐方式" : "卡在哪里？下一次从哪里继续？"} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-        </div>
-        {conflicts.length > 0 && <div className="record-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>与已有时间记录重叠</strong>{conflicts.map((session) => <span key={session.id}>{session.date} {session.start}–{session.end} · {session.task}</span>)}<small>请调整本条记录的日期或起止时间；已有记录不会被覆盖。</small></div></div>}
-        <div className="dialog-footer"><span>{isLifeActivity ? "计入全天记录" : "计入有效学习"}：<strong>{formatMinutes(plannedMinutes)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" type="submit" disabled={!form.task.trim() || !hasValidRange || conflicts.length > 0}><Check size={17} />{initial ? "保存修改" : "保存记录"}</button></div></div>
-      </form>
-    </div>
-  );
-}
-
-function PlanItemDialog({ state, date, initial, onClose, onSave }: { state: StudyState; date: string; initial: PlanItem | null; onClose: () => void; onSave: (item: PlanItem) => void }) {
-  const [form, setForm] = useState(() => initial ? {
-    start: initial.start,
-    end: initial.end,
-    subjectId: initial.subjectId,
-    task: initial.task,
-    note: initial.note,
-  } : { start: "08:00", end: "10:00", subjectId: state.subjects[0]?.id ?? "math", task: "", note: "" });
-  const duration = minutesBetween(form.start, form.end, form.subjectId === "sleep");
-  const range = scheduledTimeRange(date, form.start, form.end, form.subjectId === "sleep");
-  const conflicts = range
-    ? findOverlappingPlanItems(range, state.plans, initial ? new Set([initial.id]) : new Set())
-    : [];
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!form.task.trim() || !range || conflicts.length) return;
-    onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, task: form.task.trim() });
-  }
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <form className="record-dialog" onSubmit={submit}>
-        <div className="dialog-heading"><div><p className="card-kicker">{date} · 计划</p><h2>{initial ? "编辑计划时段" : "安排一个计划时段"}</h2></div><button type="button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
-        <div className="dialog-grid">
-          <label><span>科目 / 活动</span><select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}><optgroup label="考试科目">{state.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</optgroup><optgroup label="生活活动">{state.lifeActivities.filter((activity) => activity.active !== false).map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</optgroup></select></label>
-          <label><span>计划任务</span><input autoFocus value={form.task} placeholder="例如：高数基础讲义第 3 章" onChange={(event) => setForm({ ...form, task: event.target.value })} /></label>
-          <label><span>开始时间</span><input type="time" value={form.start} onChange={(event) => setForm({ ...form, start: event.target.value })} /></label>
-          <label><span>结束时间</span><input type="time" value={form.end} onChange={(event) => setForm({ ...form, end: event.target.value })} /></label>
-          <label className="wide"><span>计划备注（可选）</span><textarea value={form.note} placeholder="目标章节、题量或完成标准" onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
-        </div>
-        {conflicts.length > 0 && <div className="form-conflict-warning" role="alert"><AlertTriangle size={18} /><div><strong>与已有计划时段重叠</strong>{conflicts.map(({ date: conflictDate, item }) => <span key={item.id}>{conflictDate} {item.start}–{item.end} · {item.task}</span>)}<small>请调整起止时间；首尾相接的时段可以正常保存。</small></div></div>}
-        <div className="dialog-footer"><span>计划时长：<strong>{formatMinutes(duration)}</strong></span><div><button type="button" className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!form.task.trim() || !range || conflicts.length > 0}><Save size={16} />{initial ? "保存修改" : "保存计划"}</button></div></div>
-      </form>
-    </div>
-  );
-}
-
-function SessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
-  return <div className="session-table">{sessions.map((session) => { const subject = state.subjects.find((item) => item.id === session.subjectId); const activity = lifeActivity(session.subjectId, state.lifeActivities); return <div className="session-row" key={session.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{session.start}–{session.end}</time><div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div><span className="session-duration">{formatMinutes(session.actualMinutes)}</span><span className="category-pill">{activity ? "活动" : "科目"}</span><button onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button></div>; })}</div>;
-}
-
-function EditableSessionTable({ sessions, state, onEdit, onDelete }: { sessions: StudySession[]; state: StudyState; onEdit: (session: StudySession) => void; onDelete: (id: string) => void }) {
-  return <div className="session-table">{sessions.map((session) => {
-    const subject = state.subjects.find((item) => item.id === session.subjectId);
-    const activity = lifeActivity(session.subjectId, state.lifeActivities);
-    return <div className="session-row" key={session.id}>
-      <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
-      <time>{session.start}–{session.end}</time>
-      <div><strong>{session.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{session.note ? ` · ${session.note}` : ""}</span></div>
-      <span className="session-duration">{formatMinutes(session.actualMinutes)}</span>
-      <span className="category-pill">{activity ? "活动" : "科目"}</span>
-      <span className="row-actions">
-        <button type="button" onClick={() => onEdit(session)} aria-label="编辑记录"><Pencil size={15} /></button>
-        <button type="button" onClick={() => onDelete(session.id)} aria-label="删除记录"><Trash2 size={16} /></button>
-      </span>
-    </div>;
-  })}</div>;
-}
-
-function EditablePlanTable({ items, sessions, state, canStart, onStart, onEdit, onDelete }: { items: PlanItem[]; sessions: StudySession[]; state: StudyState; canStart: boolean; onStart: (item: PlanItem) => void; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
-  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => {
-    const subject = state.subjects.find((entry) => entry.id === item.subjectId);
-    const activity = lifeActivity(item.subjectId, state.lifeActivities);
-    const linkedSessions = sessions.filter((session) => session.planItemId === item.id);
-    const plannedMinutes = minutesBetween(item.start, item.end, item.subjectId === "sleep");
-    const actualMinutes = linkedSessions.reduce((sum, session) => sum + session.actualMinutes, 0);
-    const completion = actualMinutes > 0
-      ? Math.round(linkedSessions.reduce((sum, session) => sum + session.completion * session.actualMinutes, 0) / actualMinutes)
-      : 0;
-    const variance = actualMinutes - plannedMinutes;
-    const varianceLabel = variance > 0 ? `超时 +${variance} min` : variance < 0 ? `提前 ${Math.abs(variance)} min` : "与计划一致";
-    return <div className="plan-list-row execution-plan-row" key={item.id}>
-      <span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} />
-      <time>{item.start}–{item.end}</time>
-      <div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div>
-      <div className={`plan-execution-summary ${linkedSessions.length ? "has-records" : ""}`}>
-        {linkedSessions.length ? <><strong>计划 {plannedMinutes} min → 实际 {actualMinutes} min</strong><span>完成度 {completion}% · {varianceLabel} · 已关联 {linkedSessions.length} 段</span></> : <><strong>计划 {plannedMinutes} min</strong><span>尚未开始执行</span></>}
-      </div>
-      <span className="row-actions">
-        <button type="button" className="start-plan-button" disabled={!canStart} onClick={() => onStart(item)} aria-label={`开始此任务：${item.task}`} title={canStart ? "进入计时器并自动关联计划" : "只能从今天的计划开始计时"}><Play size={14} fill="currentColor" />{linkedSessions.length ? "继续计时" : "开始此任务"}</button>
-        <button type="button" onClick={() => onEdit(item)} aria-label="编辑计划"><Pencil size={15} /></button>
-        <button type="button" onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button>
-      </span>
-    </div>;
-  })}</div>;
-}
-
-function DayScheduleChart({ entries, state, mode }: {
-  entries: (StudySession | PlanItem)[];
-  state: StudyState;
-  mode: "planned" | "actual";
-}) {
-  const durationFor = (entry: StudySession | PlanItem) => {
-    const stored = mode === "planned"
-      ? "plannedMinutes" in entry ? entry.plannedMinutes : minutesBetween(entry.start, entry.end, entry.subjectId === "sleep")
-      : "actualMinutes" in entry ? entry.actualMinutes : minutesBetween(entry.start, entry.end, entry.subjectId === "sleep");
-    return Math.min(24 * 60, Math.max(0, Number(stored) || minutesBetween(entry.start, entry.end, entry.subjectId === "sleep")));
-  };
-  const chartEntries = entries.filter((entry) => durationFor(entry) > 0);
-  const hours = [0, 6, 12, 18, 24];
-
-  if (!chartEntries.length) {
-    return <div className="schedule-empty">暂无可生成图表的时段，新增记录后会自动绘制。</div>;
-  }
-
-  return (
-    <div className="day-schedule" aria-label={mode === "planned" ? "今日计划安排图" : "实际时间记录图"}>
-      <div className="schedule-axis-label" />
-      <div className="schedule-axis">{hours.map((hour) => <span key={hour} style={{ left: `${hour / 24 * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>)}</div>
-      {chartEntries.map((entry) => {
-        const subject = state.subjects.find((item) => item.id === entry.subjectId);
-        const activity = lifeActivity(entry.subjectId, state.lifeActivities);
-        const duration = durationFor(entry);
-        const start = timeToMinutes(entry.start);
-        const firstDuration = Math.min(duration, 24 * 60 - start);
-        const wrappedDuration = Math.max(0, duration - firstDuration);
-        const end = (start + duration) % (24 * 60);
-        const endLabel = minutesToTime(end);
-        const color = subject?.accent ?? activity?.accent ?? "var(--accent)";
-        const title = `${entry.task} · ${entry.start}–${endLabel} · ${formatMinutes(duration)}`;
-        return (
-          <div className="schedule-row" key={entry.id}>
-            <div className="schedule-row-label"><strong>{entry.task}</strong><span>{entry.start}–{endLabel}</span></div>
-            <div className="schedule-track">
-              {hours.map((hour) => <i className="schedule-gridline" key={hour} style={{ left: `${hour / 24 * 100}%` }} />)}
-              <span className="schedule-block" title={title} style={{ left: `${start / (24 * 60) * 100}%`, width: `${firstDuration / (24 * 60) * 100}%`, background: color }} />
-              {wrappedDuration > 0 && <span className="schedule-block" title={title} style={{ left: 0, width: `${wrappedDuration / (24 * 60) * 100}%`, background: color }} />}
-            </div>
-          </div>
-        );
-      })}
-      <div className="schedule-legend"><span><i />{mode === "planned" ? "计划时段" : "实际记录"}</span><small>横轴为 00:00–24:00，悬停色块可查看详情</small></div>
-    </div>
-  );
-}
-
-function PlanTable({ items, state, onEdit, onDelete }: { items: PlanItem[]; state: StudyState; onEdit: (item: PlanItem) => void; onDelete: (id: string) => void }) {
-  return <div className="plan-list">{[...items].sort((a, b) => a.start.localeCompare(b.start)).map((item) => { const subject = state.subjects.find((entry) => entry.id === item.subjectId); const activity = lifeActivity(item.subjectId, state.lifeActivities); return <div className="plan-list-row" key={item.id}><span className="subject-indicator" style={{ background: subject?.accent ?? activity?.accent }} /><time>{item.start}–{item.end}</time><div><strong>{item.task}</strong><span>{subject?.name ?? activity?.name ?? "其他"}{item.note ? ` · ${item.note}` : ""}</span></div><button onClick={() => onDelete(item.id)} aria-label="删除计划"><Trash2 size={16} /></button></div>; })}</div>;
-}
-
-function ProgressRing({ value, label, compact = false, color }: { value: number; label?: string; compact?: boolean; color?: string }) {
-  return <div className={`progress-ring ${compact ? "compact" : ""}`} style={{ "--progress": `${Math.min(100, Math.max(0, value)) * 3.6}deg`, "--ring-color": color ?? "var(--accent)" } as React.CSSProperties}><div><strong>{value}%</strong>{label && <span>{label}</span>}</div></div>;
-}
-
-function ScoreRow({ label, value, max }: { label: string; value: number; max: number }) {
-  return <div className="score-row"><span>{label}</span><div className="mini-track"><i style={{ width: `${Math.min(100, (value / Math.max(1, max)) * 100)}%` }} /></div><strong>{value}<small>/{max}</small></strong></div>;
-}
-
-function EmptyState({ icon: Icon, title, detail, action, onAction }: { icon: typeof Clock3; title: string; detail: string; action: string; onAction: () => void }) {
-  return <div className="empty-state"><div><Icon size={25} /></div><strong>{title}</strong><p>{detail}</p><button className="text-button" onClick={onAction}>{action}<ChevronRight size={15} /></button></div>;
-}
-
-function ScoreGuide({ number, title, detail }: { number: string; title: string; detail: string }) {
-  return <div className="guide-item"><span>{number}</span><div><strong>{title}</strong><p>{detail}</p></div></div>;
-}
-

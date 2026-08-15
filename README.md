@@ -19,6 +19,15 @@ npm install
 npm run dev
 ```
 
+## 测试
+
+```bash
+npm test        # 运行一次全部单测
+npm run test:watch
+```
+
+单测覆盖时间记录重叠检测、计划冲突、导入查重/顺延、进度预测、成绩与复习数据归一化等纯函数模块。
+
 ## 构建
 
 ```bash
