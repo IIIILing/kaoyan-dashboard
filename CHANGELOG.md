@@ -2,6 +2,13 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。所有改动按里程碑记录,git 提交号见括号。
 
+## [1.5.0] - 2026-08 学习热力图
+
+- **新功能:学习热力图**(总览页):GitHub 风格贡献图,支持**按年 / 按年月切换**;色块按当天有效学习分钟分级(0 / <1h / <4h / <8h / ≥8h);月视图为对齐星期的日历网格;附带"当前连续 / 最长连续学习天数"指标(`src/lib/calendar.ts` + `src/components/LearningCalendar.tsx`)
+- **优化**:对话框服务函数(`alertDialog / confirmDialog / promptDialog`)拆到独立文件 `src/components/dialog-service.ts`,react-refresh lint 警告清零(全项目 0 问题 0 警告)
+- **优化**:浏览器标题随视图切换(如"考研项目管理台 · 今日计划")
+- 测试:77 → 88 个断言(日历聚合、连续天数)
+
 ## [1.4.0] - 2026-08 工程规范
 
 - **工程规范**:引入 ESLint(flat config,TypeScript + React Hooks 规则)与 Prettier,新增 `npm run lint` / `npm run format`;清理未使用导入/变量与 render 期副作用(`Date.now`)

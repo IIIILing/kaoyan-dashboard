@@ -1,4 +1,5 @@
 import { BookOpen, CalendarDays, Check, ChevronRight, CircleGauge, Plus, TimerReset } from "lucide-react";
+import LearningCalendar from "../components/LearningCalendar";
 import { EmptyState, MiniTrend, ProgressRing, ScoreRow } from "../components/ui";
 import { lifeActivity } from "../lib/activities";
 import { localDate, recentDates } from "../lib/dates";
@@ -76,6 +77,8 @@ export default function Overview({ state, todaySessions, metrics, progress, proj
       </section>
 
       <InputOutputPanel state={state} onNavigate={onNavigate} />
+
+      <LearningCalendar state={state} />
 
       <section className="subject-grid">
         {state.subjects.map((subject) => {

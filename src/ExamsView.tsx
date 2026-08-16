@@ -1,6 +1,6 @@
 import { Clock3, Pencil, Plus, Save, Target, Trash2, TrendingUp, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { confirmDialog } from "./components/dialogs";
+import { confirmDialog } from "./components/dialog-service";
 import { scoreRate } from "./exam-data";
 import { localDate } from "./lib/dates";
 import type { ExamPaperType, ExamRecord, ExamSection, StudyState } from "./study-state";

@@ -45,14 +45,17 @@ src/
 ├── lib/                     # ★ 纯工具(全部有单测)
 │   ├── normalize.ts         #   存档归一化/迁移(v1/v2→v3)
 │   ├── scoring.ts           #   评分引擎(每日/周报得分)
+│   ├── calendar.ts          #   学习热力图聚合/连续天数(1.5.0 新增)
 │   ├── format.ts  dates.ts  #   时间/日期工具(全项目唯一实现)
 │   ├── image.ts             #   图片压缩(图标/背景图存 localStorage 前)
 │   ├── accounts.ts  types.ts  activities.ts
 ├── components/
-│   ├── dialogs.tsx          # 通用对话框 alertDialog/confirmDialog/promptDialog + DialogHost
+│   ├── dialog-service.ts    # 对话框服务 alertDialog/confirmDialog/promptDialog(独立文件,无组件)
+│   ├── dialogs.tsx          # 对话框组件(DialogHost/BackupDialog/RecordDialog/…)
+│   ├── LearningCalendar.tsx # 学习热力图组件(总览页,1.5.0 新增)
 │   ├── tables.tsx  ui.tsx   # 表格/图表/展示组件
 ├── views/                   # 7 个页面视图(default export,props 由 App 传入)
-├── __tests__/               # 9 个测试文件 / 77 断言(会被 tsc 类型检查)
+├── __tests__/               # 10 个测试文件 / 88 断言(会被 tsc 类型检查)
 ├── TimerView.tsx            # 专注计时器(较大,独立)
 ├── ExamsView.tsx  ReviewView.tsx  ExperiencesView.tsx
 ├── WeeklyInsights.tsx  ExperienceBenchmarkPanel.tsx

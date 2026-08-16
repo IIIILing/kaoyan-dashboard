@@ -1,6 +1,6 @@
 import { AlertCircle, BookOpen, CalendarClock, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { confirmDialog } from "./components/dialogs";
+import { confirmDialog } from "./components/dialog-service";
 import { completeReviewItem, nextReviewInterval } from "./review-data";
 import { localDate } from "./lib/dates";
 import type { ReviewItem, ReviewItemKind, StudyState } from "./study-state";

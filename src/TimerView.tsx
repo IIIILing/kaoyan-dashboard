@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { alertDialog, confirmDialog } from "./components/dialogs";
+import { alertDialog, confirmDialog } from "./components/dialog-service";
 import { compressImageFile } from "./lib/image";
 import type { StudySession, StudyState } from "./study-state";
 import { findOverlappingSessions } from "./session-time";

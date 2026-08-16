@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Clock3, Copy, Plus, Save, Trash2 } from "lucide-react";
-import { confirmDialog, promptDialog } from "../components/dialogs";
+import { confirmDialog, promptDialog } from "../components/dialog-service";
 import { DayScheduleChart, EditablePlanTable, EditableSessionTable } from "../components/tables";
 import { EmptyState } from "../components/ui";
 import { dateOffset, localDate } from "../lib/dates";

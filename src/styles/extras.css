@@ -175,3 +175,37 @@
 
 /* 视图懒加载占位 */
 .view-loading { min-height: 180px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+
+/* 学习热力图(总览页,年视图 GitHub 风格 + 月视图日历) */
+.calendar-panel { padding: 22px; }
+.calendar-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: flex-end; color: var(--muted); font-size: 10px; }
+.calendar-summary strong { color: var(--primary); font-size: 13px; margin-left: 3px; }
+.calendar-toolbar { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.calendar-toolbar label { width: 130px; }
+.calendar-toolbar label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.calendar-legend { display: flex; align-items: center; gap: 4px; margin-left: auto; color: var(--faint); font-size: 9px; }
+.calendar-legend .cal-cell { width: 12px; height: 12px; }
+:root { --cal-1: #d8e6f2; --cal-2: #9dc2de; --cal-3: #4f8fc0; --cal-4: #1d5f96; }
+:root[data-theme="dark"] { --cal-1: #23394d; --cal-2: #2e5f85; --cal-3: #3578a8; --cal-4: #5aa7d6; }
+.cal-cell { width: 13px; height: 13px; flex: 0 0 auto; border-radius: 3px; background: var(--bg-soft); }
+.cal-cell.blank { background: transparent; }
+.cal-cell.l1 { background: var(--cal-1); }
+.cal-cell.l2 { background: var(--cal-2); }
+.cal-cell.l3 { background: var(--cal-3); }
+.cal-cell.l4 { background: var(--cal-4); }
+.cal-cell[title] { cursor: help; }
+.calendar-year-view { overflow-x: auto; padding-bottom: 4px; }
+.calendar-year-labels { position: relative; height: 18px; margin-bottom: 4px; }
+.calendar-year-labels span { position: absolute; top: 0; color: var(--faint); font-size: 8px; white-space: nowrap; }
+.calendar-row { display: flex; align-items: center; gap: 3px; min-width: max-content; }
+.calendar-row-label { width: 16px; flex: 0 0 auto; color: var(--faint); font-size: 8px; text-align: center; }
+.calendar-month-view { max-width: 640px; }
+.calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 5px; color: var(--faint); font-size: 9px; text-align: center; }
+.calendar-month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar-month-grid .cal-cell { width: auto; height: auto; aspect-ratio: 1; display: grid; place-items: center; font-size: 9px; color: var(--muted); }
+.calendar-month-grid .cal-cell.l1 { color: var(--muted); }
+.calendar-month-grid .cal-cell.l4 { color: #fff; }
+@media (max-width: 640px) {
+  .calendar-summary { justify-content: flex-start; }
+  .calendar-toolbar label { width: 100px; }
+}
