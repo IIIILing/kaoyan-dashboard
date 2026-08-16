@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -13,6 +13,7 @@ import {
   NotebookText,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
   Settings,
   SlidersHorizontal,
   Sun,
@@ -37,10 +38,8 @@ import { daysUntil, localDate, recentDates } from "./lib/dates";
 import { downloadFile, minutesBetween } from "./lib/format";
 import { dailyMetrics, periodSummary, sessionsForDate } from "./lib/scoring";
 import type { BackupMode, RecordDraft, View } from "./lib/types";
-import { normalizeExperiences } from "./experience-data";
-import { normalizeExamRecords } from "./exam-data";
 import { computeImportMerge } from "./import-merge";
-import { normalizeReviewItems } from "./review-data";
+import { normalizeStudyState } from "./lib/normalize";
 import {
   createScheduleArchive,
   parseScheduleImport,
@@ -49,7 +48,6 @@ import {
   type ScheduleImportCandidate,
 } from "./schedule-data";
 import {
-  defaultLifeActivities,
   defaultStudyState,
   projectProgress,
   subjectProgress,
@@ -59,19 +57,21 @@ import {
   type StudyState,
 } from "./study-state";
 import { applyThemePalette } from "./theme-palettes";
-import ExperiencesView from "./ExperiencesView";
-import ExamsView from "./ExamsView";
-import ReviewView from "./ReviewView";
-import TimerView, { type TimerLaunchRequest } from "./TimerView";
-import Overview from "./views/Overview";
-import RecordsView from "./views/RecordsView";
-import ScoringView from "./views/ScoringView";
-import SettingsView from "./views/SettingsView";
-import SubjectsView from "./views/SubjectsView";
-import TodayView from "./views/TodayView";
-import WeeklyView from "./views/WeeklyView";
+import type { TimerLaunchRequest } from "./TimerView";
+// 视图按需分包(React.lazy):首屏只加载当前视图,切换视图时才拉取对应 chunk。
+const ExperiencesView = lazy(() => import("./ExperiencesView"));
+const ExamsView = lazy(() => import("./ExamsView"));
+const ReviewView = lazy(() => import("./ReviewView"));
+const TimerView = lazy(() => import("./TimerView"));
+const Overview = lazy(() => import("./views/Overview"));
+const RecordsView = lazy(() => import("./views/RecordsView"));
+const ScoringView = lazy(() => import("./views/ScoringView"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+const SubjectsView = lazy(() => import("./views/SubjectsView"));
+const TodayView = lazy(() => import("./views/TodayView"));
+const WeeklyView = lazy(() => import("./views/WeeklyView"));
 
-type SaveStatus = "loading" | "saving" | "saved";
+type SaveStatus = "loading" | "saving" | "saved" | "error";
 type UndoAction = {
   id: string;
   message: string;
@@ -112,135 +112,6 @@ function isAccountRegistry(value: unknown): value is AccountRegistry {
     );
 }
 
-function normalizeStudyState(value: unknown): StudyState | null {
-  if (!value || typeof value !== "object") return null;
-  const parsed = value as StudyState;
-  if (
-    (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)
-    || !Array.isArray(parsed.subjects)
-    || !Array.isArray(parsed.sessions)
-  ) return null;
-
-  const scheduleImport = parseScheduleImport(parsed);
-  const normalized: StudyState = withUnifiedSchedule({
-    ...parsed,
-    version: 3,
-    profile: {
-      ...defaultStudyState.profile,
-      ...parsed.profile,
-      sidebarIcon: parsed.profile?.sidebarIcon ?? defaultStudyState.profile.sidebarIcon,
-    },
-    scoring: {
-      weights: {
-        ...defaultStudyState.scoring.weights,
-        ...parsed.scoring?.weights,
-      },
-      weeklyRules: Array.isArray(parsed.scoring?.weeklyRules)
-        ? parsed.scoring.weeklyRules
-        : defaultStudyState.scoring.weeklyRules,
-    },
-    appearance: {
-      ...defaultStudyState.appearance,
-      ...parsed.appearance,
-      customLight: {
-        ...defaultStudyState.appearance.customLight,
-        ...parsed.appearance?.customLight,
-      },
-      customDark: {
-        ...defaultStudyState.appearance.customDark,
-        ...parsed.appearance?.customDark,
-      },
-    },
-    lifeActivities: Array.isArray(parsed.lifeActivities)
-      ? parsed.lifeActivities.map((activity) => ({ ...activity, active: activity.active !== false }))
-      : defaultLifeActivities,
-    subjects: parsed.subjects.map((subject) => ({
-      ...subject,
-      phases: subject.phases.map((phase) => ({
-        ...phase,
-        startDate: typeof phase.startDate === "string" ? phase.startDate : undefined,
-        targetDate: typeof phase.targetDate === "string" ? phase.targetDate : undefined,
-        targetProgress: Number.isFinite(Number(phase.targetProgress)) ? Math.min(100, Math.max(1, Number(phase.targetProgress))) : 100,
-        progressHistory: Array.isArray(phase.progressHistory)
-          ? phase.progressHistory.filter((snapshot) => snapshot && typeof snapshot.date === "string" && Number.isFinite(Number(snapshot.progress))).map((snapshot) => ({ date: snapshot.date, progress: Math.min(100, Math.max(0, Number(snapshot.progress))) }))
-          : [],
-        resources: Array.isArray(phase.resources) ? phase.resources : [],
-      })),
-    })),
-    sessions: scheduleImport?.sessions ?? parsed.sessions,
-    plans: scheduleImport?.plans ?? (Array.isArray(parsed.plans) ? parsed.plans : []),
-    schedule: [],
-    planTemplates: Array.isArray(parsed.planTemplates) ? parsed.planTemplates : [],
-    examRecords: normalizeExamRecords(parsed.examRecords),
-    reviewItems: normalizeReviewItems(parsed.reviewItems),
-    dataSafety: {
-      ...defaultStudyState.dataSafety,
-      ...parsed.dataSafety,
-    },
-    experiences: normalizeExperiences(parsed.experiences),
-    fastestExperienceId: typeof parsed.fastestExperienceId === "string"
-      && normalizeExperiences(parsed.experiences).some((item) => item.id === parsed.fastestExperienceId)
-      ? parsed.fastestExperienceId
-      : defaultStudyState.fastestExperienceId,
-  });
-
-  if (parsed.version === 3) return normalized;
-
-  const legacyProgressSource: Record<string, string[]> = {
-    "eng-word-first": ["eng-word-first", "eng-word", "eng-word-second"],
-    "eng-real": ["eng-real", "eng-read"],
-    "eng-translation": ["eng-other"],
-    "eng-mock": ["eng-mock"],
-    "eng-writing": ["eng-writing", "eng-write"],
-    "cir-first": ["cir-first", "cir-basic"],
-    "cir-chapter": ["cir-chapter", "cir-exercise"],
-    "cir-real": ["cir-real"],
-    "cir-material": ["cir-material", "cir-mock"],
-  };
-  const supersededPhaseIds = new Set([
-    "eng-word", "eng-word-second", "eng-read", "eng-other", "eng-write",
-    "cir-basic", "cir-exercise", "cir-mock",
-  ]);
-  return {
-    ...normalized,
-    subjects: normalized.subjects.map((subject) => {
-      const rapid = defaultStudyState.subjects.find((item) => item.id === subject.id);
-      if (!rapid) return subject;
-      const phaseById = new Map(subject.phases.map((phase) => [phase.id, phase]));
-      const progressById = new Map(subject.phases.map((phase) => [phase.id, phase.progress]));
-      const resourcesById = new Map(subject.phases.map((phase) => [phase.id, phase.resources]));
-      const rapidIds = new Set(rapid.phases.map((phase) => phase.id));
-      const migratedPhases = rapid.phases.map((phase) => {
-        const candidates = legacyProgressSource[phase.id] ?? [phase.id];
-        const savedPhase = candidates.map((id) => phaseById.get(id)).find((item) => item?.startDate || item?.targetDate || item?.progressHistory?.length);
-        const savedProgress = candidates
-          .map((id) => progressById.get(id))
-          .filter((value): value is number => typeof value === "number");
-        const savedResources = candidates.flatMap((id) => resourcesById.get(id) ?? []);
-        const resources = [...phase.resources];
-        for (const resource of savedResources) {
-          const index = resources.findIndex((item) => item.id === resource.id);
-          if (index >= 0) resources[index] = resource;
-          else resources.push(resource);
-        }
-        return {
-          ...phase,
-          progress: savedProgress.length ? Math.max(...savedProgress) : phase.progress,
-          startDate: savedPhase?.startDate,
-          targetDate: savedPhase?.targetDate,
-          targetProgress: savedPhase?.targetProgress ?? 100,
-          progressHistory: savedPhase?.progressHistory ?? [],
-          resources,
-        };
-      });
-      const customPhases = subject.phases.filter((phase) =>
-        !rapidIds.has(phase.id) && !supersededPhaseIds.has(phase.id),
-      );
-      return { ...subject, note: rapid.note, phases: [...migratedPhases, ...customPhases] };
-    }),
-  };
-}
-
 export default function Dashboard() {
   const [state, setState] = useState<StudyState>(defaultStudyState);
   const [accounts, setAccounts] = useState<DashboardAccount[]>([]);
@@ -250,6 +121,8 @@ export default function Dashboard() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [lastSavedAt, setLastSavedAt] = useState("");
+  const [saveError, setSaveError] = useState(false);
+  const [storageConflict, setStorageConflict] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [recordEditing, setRecordEditing] = useState<StudySession | null>(null);
@@ -365,9 +238,16 @@ export default function Dashboard() {
     if (!loaded || !activeAccountId) return;
     queueMicrotask(() => setSaveStatus("saving"));
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
-      setSaveStatus("saved");
-      setLastSavedAt(new Date().toISOString());
+      try {
+        window.localStorage.setItem(accountStateKey(activeAccountId), JSON.stringify(state));
+        setSaveStatus("saved");
+        setLastSavedAt(new Date().toISOString());
+        setSaveError(false);
+      } catch {
+        // 配额不足或写入失败:标记错误并在页面顶部预警,避免"静默丢数据"。
+        setSaveStatus("error");
+        setSaveError(true);
+      }
     }, 250);
     return () => window.clearTimeout(timer);
   }, [state, loaded, activeAccountId]);
@@ -394,6 +274,23 @@ export default function Dashboard() {
       window.removeEventListener("beforeunload", flushPendingSave);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
+  }, []);
+
+  // 多标签页互踩防护:其他标签页修改了账号数据(或注册表/旧数据)时,
+  // 提示刷新后再操作,避免本页的防抖写回覆盖掉另一页的最新修改。
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (!event.key) return;
+      if (
+        event.key === ACCOUNT_REGISTRY_KEY ||
+        event.key === LEGACY_LOCAL_KEY ||
+        event.key.startsWith(ACCOUNT_STATE_PREFIX)
+      ) {
+        setStorageConflict(true);
+      }
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   useEffect(() => {
@@ -430,8 +327,9 @@ export default function Dashboard() {
     [todaySessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities],
   );
   const progress = useMemo(() => projectProgress(state.subjects), [state.subjects]);
-  const sevenDates = useMemo(() => recentDates(7), [today]);
-  const thirtyDates = useMemo(() => recentDates(30), [today]);
+  // 近 7/30 日窗口按页面加载时刻生成(跨天继续使用时,刷新页面即重新计算)
+  const sevenDates = useMemo(() => recentDates(7), []);
+  const thirtyDates = useMemo(() => recentDates(30), []);
   const weekMetrics = useMemo(
     () =>
       sevenDates.map((date) => ({
@@ -881,7 +779,7 @@ export default function Dashboard() {
             </label>
             <div className={`sync-state ${saveStatus}`} title="学习数据仅保存在当前浏览器">
               <HardDrive size={16} />
-              <span>{saveStatus === "loading" ? "正在读取" : saveStatus === "saving" ? "正在保存" : "已保存到本机"}</span>
+              <span>{saveStatus === "loading" ? "正在读取" : saveStatus === "saving" ? "正在保存" : saveStatus === "error" ? "保存失败" : "已保存到本机"}</span>
             </div>
           </div>
         </header>
@@ -898,6 +796,29 @@ export default function Dashboard() {
           </div>
         )}
 
+        {saveError && (
+          <div className="storage-full-banner" role="alert">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>本机存储空间不足,最近的修改可能没有保存</strong>
+              <span>请立即导出 JSON 备份;也可以在「设置 → 侧栏图标」或计时器背景图中移除较大的图片来释放空间。</span>
+            </div>
+            <button type="button" className="primary-button" onClick={() => setBackupMode("export")}><Download size={15} />导出备份</button>
+          </div>
+        )}
+
+        {storageConflict && (
+          <div className="backup-reminder-banner" role="status">
+            <AlertTriangle size={18} />
+            <div>
+              <strong>检测到其他标签页修改了数据</strong>
+              <span>为避免互相覆盖,请刷新页面加载最新数据后再继续操作。</span>
+            </div>
+            <button type="button" className="primary-button" onClick={() => window.location.reload()}><RotateCcw size={15} />刷新页面</button>
+          </div>
+        )}
+
+        <Suspense fallback={<div className="view-loading" aria-busy="true">加载中…</div>}>
         {view === "overview" && (
           <Overview
             state={state}
@@ -986,6 +907,7 @@ export default function Dashboard() {
             }}
           />
         )}
+        </Suspense>
         <input ref={importRef} type="file" hidden accept="application/json" onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) readImportFile(file);

@@ -2,6 +2,7 @@ import { Clock3, Pencil, Plus, Save, Target, Trash2, TrendingUp, X } from "lucid
 import { useMemo, useState } from "react";
 import { confirmDialog } from "./components/dialogs";
 import { scoreRate } from "./exam-data";
+import { localDate } from "./lib/dates";
 import type { ExamPaperType, ExamRecord, ExamSection, StudyState } from "./study-state";
 
 const PAPER_TYPES: { value: ExamPaperType; label: string }[] = [
@@ -18,12 +19,6 @@ function paperTypeLabel(value: ExamPaperType) {
 function formatDuration(minutes: number) {
   if (minutes < 60) return `${minutes} min`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
-}
-
-function localDate() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
 
 export default function ExamsView({ state, updateState }: { state: StudyState; updateState: (updater: (current: StudyState) => StudyState) => void }) {

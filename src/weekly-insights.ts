@@ -1,4 +1,5 @@
 import type { StudySession, StudyState } from "./study-state";
+import { timeToMinutes } from "./lib/format";
 
 export type HeatmapMetric = "minutes" | "focus" | "completion";
 
@@ -9,11 +10,6 @@ export type HeatmapCell = {
   focus: number;
   completion: number;
 };
-
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  return hours * 60 + minutes;
-}
 
 function plannedMinutes(start: string, end: string) {
   const difference = timeToMinutes(end) - timeToMinutes(start);

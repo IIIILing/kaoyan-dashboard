@@ -7,7 +7,7 @@ import {
   parseScheduleImport,
   withUnifiedSchedule,
 } from "../schedule-data";
-import type { DailyPlan, PlanItem, PlanTemplate, StudySession } from "../study-state";
+import type { PlanItem, PlanTemplate, StudySession } from "../study-state";
 import { defaultStudyState } from "../study-state";
 
 function session(overrides: Partial<StudySession> = {}): StudySession {

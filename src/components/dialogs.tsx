@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -112,26 +112,59 @@ export function DialogHost() {
 
 function GenericDialog({ request, onSettle }: { request: DialogRequest; onSettle: (value: boolean | string | null) => void }) {
   const [value, setValue] = useState(request.defaultValue ?? "");
+  const dialogRef = useRef<HTMLElement | null>(null);
   const confirmText = request.confirmLabel ?? (request.kind === "alert" ? "知道了" : "确定");
   const cancelText = request.cancelLabel ?? "取消";
+
+  // 打开时把焦点放进对话框(已有 autoFocus 元素时不抢焦点),关闭后还原到打开前的元素。
+  useEffect(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const container = dialogRef.current;
+    if (container && !container.contains(document.activeElement)) {
+      container.focus();
+    }
+    return () => previousFocus?.focus?.();
+  }, []);
 
   function cancel() {
     onSettle(request.kind === "prompt" ? null : false);
   }
 
+  function handleKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+      return;
+    }
+    // 焦点圈定:Tab / Shift+Tab 在对话框内循环,避免焦点逃逸到背景页面。
+    if (event.key === "Tab") {
+      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && cancel()}>
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className={`confirm-dialog ${request.danger ? "is-danger" : ""}`}
         role="alertdialog"
         aria-modal="true"
         aria-label={request.title}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            cancel();
-          }
-        }}
+        onKeyDown={handleKeyDown}
       >
         <div className="dialog-heading">
           <div><p className="card-kicker">{request.kind === "alert" ? "提示" : request.kind === "confirm" ? "确认操作" : "请输入"}</p><h2>{request.title}</h2></div>

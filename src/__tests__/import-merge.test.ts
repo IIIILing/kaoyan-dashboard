@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeImportMerge } from "../import-merge";
 import type { ScheduleImportCandidate } from "../schedule-data";
 import { defaultStudyState } from "../study-state";
-import type { DailyPlan, ExamRecord, PlanItem, PlanTemplate, ReviewItem, StudySession, StudyState } from "../study-state";
+import type { ExamRecord, PlanItem, PlanTemplate, ReviewItem, StudySession, StudyState } from "../study-state";
 
 function session(overrides: Partial<StudySession> = {}): StudySession {
   return {

@@ -1,4 +1,5 @@
 import type { ReviewItem, ReviewItemKind } from "./study-state";
+import { dateOffset, localDate } from "./lib/dates";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const REVIEW_INTERVALS = [3, 7, 14] as const;
@@ -14,17 +15,6 @@ function text(value: unknown) {
 function numberInRange(value: unknown, fallback: number, min: number, max: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
-}
-
-function localDate(value = new Date()) {
-  const offset = value.getTimezoneOffset() * 60_000;
-  return new Date(value.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function addDays(date: string, days: number) {
-  const next = new Date(`${date}T12:00:00`);
-  next.setDate(next.getDate() + days);
-  return localDate(next);
 }
 
 function reviewKind(value: unknown): ReviewItemKind {
@@ -63,7 +53,7 @@ export function completeReviewItem(item: ReviewItem, date = localDate(), mastery
     mastery: Math.min(5, Math.max(1, Math.round(mastery))),
     reviewCount: item.reviewCount + 1,
     lastReviewedAt: new Date().toISOString(),
-    nextReviewDate: addDays(date, interval),
+    nextReviewDate: dateOffset(date, interval),
   };
 }
 

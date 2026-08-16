@@ -9,6 +9,7 @@ import type {
   StudyState,
 } from "./study-state";
 import { normalizeExamRecords } from "./exam-data";
+import { minutesBetween, minutesToTime, timeToMinutes } from "./lib/format";
 import { normalizeReviewItems } from "./review-data";
 
 export type DateRange = { from: string; to: string };
@@ -75,21 +76,6 @@ function legacyId(prefix: string, parts: string[]) {
     hash = Math.imul(hash, 16777619);
   }
   return `${prefix}-${(hash >>> 0).toString(36)}`;
-}
-
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function minutesToTime(total: number) {
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function minutesBetween(start: string, end: string, allowOvernight = false) {
-  const difference = timeToMinutes(end) - timeToMinutes(start);
-  if (allowOvernight && difference < 0) return difference + 24 * 60;
-  return Math.max(0, difference);
 }
 
 function normalizedTask(task: string) {

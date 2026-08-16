@@ -1,11 +1,11 @@
-import { BookOpen, CalendarDays, Check, ChevronRight, CircleGauge, Clock3, Plus, TimerReset } from "lucide-react";
+import { BookOpen, CalendarDays, Check, ChevronRight, CircleGauge, Plus, TimerReset } from "lucide-react";
 import { EmptyState, MiniTrend, ProgressRing, ScoreRow } from "../components/ui";
 import { lifeActivity } from "../lib/activities";
 import { localDate, recentDates } from "../lib/dates";
 import { sessionsForDate, type DailyMetrics } from "../lib/scoring";
 import type { View } from "../lib/types";
 import { phaseForecast } from "../progress-forecast";
-import { projectProgress, subjectProgress, type StudySession, type StudyState } from "../study-state";
+import { subjectProgress, type StudySession, type StudyState } from "../study-state";
 
 export default function Overview({ state, todaySessions, metrics, progress, projectScore, days, onRecord, onNavigate }: {
   state: StudyState;

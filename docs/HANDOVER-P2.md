@@ -4,7 +4,13 @@
 
 > **✅ P2 已完成(2025-07,提交 8b30a1c / 710e1cc / 97a224a)**:P2-B 导入预览、P2-A 33 处原生弹窗统一改造(新增 `alertDialog / confirmDialog / promptDialog` + `DialogHost`,详见 §5)、P2-C 的 CI 测试门禁 / 清死代码 / 删账号 undo 均已落地。本文件保留原清单供查阅,新窗口如接手新任务(P3),直接照 §6 环境约定开工即可。
 
-> **📌 后续小修(2025-07,commit `pending`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署。
+> **📌 后续小修(2025-07,commit `d7283fb`)**:清理无引用的 `SessionTable`、README 与本文档快照同步、分支合并到 `main` 触发 CI/部署;移动端验收通过。
+
+> **📌 数据可靠性加固(2025-07,commit `eab5840`)**:① 防抖保存加 try/catch,写入失败时顶栏显示"保存失败"并出现"存储空间不足"预警横幅(含导出备份入口);② 新增评分引擎单测 `src/__tests__/scoring.test.ts`(12 个断言,覆盖权重曲线、dailyMetrics、periodSummary),测试总数 59 → 71。
+
+> **📌 体验与健壮性(2025-07,commit `fad8b31`)**:① 新增 `src/lib/image.ts` 图片压缩(侧栏图标压到 128px、计时器背景图压到 1280px,PNG 保透明、SVG 原样),避免 base64 撑爆配额;② 收敛重复工具函数(`localDate` 从 ExamsView/ReviewView/ExperienceBenchmarkPanel/review-data 删除副本,`timeToMinutes/minutesToTime/minutesBetween` 从 weekly-insights/schedule-data/lib-scoring 删除副本,统一走 `src/lib/format.ts` 与 `src/lib/dates.ts`);③ 多标签页互踩防护:监听 `storage` 事件,其他标签页改动数据时提示刷新;④ `GenericDialog` 增加焦点圈定(Tab 循环 + 关闭还原焦点)。
+
+> **📌 迁移逻辑可测化(2025-07,commit `5aeab00`)**:`normalizeStudyState` 从 `App.tsx` 抽到 `src/lib/normalize.ts` 并补 6 个单测(老阶段 id 迁移、缺字段补全、防御异常数据不抛错);顺带修复隐患——科目缺 `phases` 字段时不再抛异常被吞掉,而是归一为空阶段列表。测试总数 71 → 77。
 
 ---
 
@@ -161,7 +167,7 @@ src/
 1. **CI 加测试门禁** — ✅ 已做(`deploy-pages.yml` 在 build 前执行 `npm test`,测试失败不发布)
 2. **清死代码** — ✅ 已做(`PlanTable`、后续清理的 `SessionTable` 均已删除)
 3. **破坏性操作接入 undo** — ✅ 已做(删账号接入 `offerUndo`)
-4. **移动端验收** — ⬜ 未做(建议:`dev` 下用响应式模式过一遍 `.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart`;styles.css 已有 640/768/860px 断点)
+4. **移动端验收** — ✅ 已做(2025-07 响应式验收通过:`.sidebar` 抽屉、`EditableSessionTable`、`DayScheduleChart` 在 640/768/860px 断点下表现正常)
 
 ## 6. 环境与约定(本仓库工作环境)
 
