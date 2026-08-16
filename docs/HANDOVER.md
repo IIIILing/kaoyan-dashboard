@@ -91,26 +91,26 @@ src/
 
 **上线方式**(需要时):`git fetch origin` → `git checkout main` → `git merge origin/main`(先同步远端,可能还有其他窗口的提交)→ `git merge codex/study-loop-roadmap` → `git push origin main`(触发 CI 自动部署)。若与远端 main 冲突,以远端为准合并。
 
-## 6. 未完成事项(上次被打断,按优先级)
+## 6. 未完成事项(按优先级)
 
-### 6.1 ESLint / Prettier(未安装 —— 本次被打断,`package.json` 未被改动)
-- 待做:① `npm install -D eslint @eslint/js typescript-eslint eslint-plugin-react-hooks eslint-plugin-react-refresh eslint-config-prettier prettier globals`;② 建 `eslint.config.js`(ESLint 9 flat config,可参考 Vite React-TS 模板)+ `.prettierrc`(项目现有风格:**无分号、双引号、printWidth 120、trailingComma none**);③ `package.json` 加 `lint` / `format` 脚本;④ 跑 `eslint` 修问题(重点:react-hooks 规则、未使用变量)。
-- 注意:全量 `prettier --write` 会产生巨大 diff(很多超长单行 JSX),建议只配置、不批量重排。
+> ✅ **2026-08 已完成四项工程规范优化**(见提交,均在本地分支):
+> - **ESLint/Prettier**:`eslint.config.js`(ESLint 10 flat config,TS + react-hooks)+ `.prettierrc`(无分号/双引号/120 列);`npm run lint` 已清零错误(仅 3 个 fast-refresh 提示);注意:未批量跑 `prettier --write`(超长单行 JSX 会产生巨大 diff)
+> - **styles.css 拆分**:已按 §6.2 方案拆成 `src/styles/` 下 4 个文件,`styles.css` 变为 `@import` 清单,构建产物逐字节一致(同 hash)
+> - **React.lazy 分包**:11 个视图全部懒加载,主包 gzip 137.7KB → 100KB
+> - **CHANGELOG + 版本**:新增 `CHANGELOG.md`,版本升至 `1.4.0`
 
-### 6.2 styles.css 拆分(结构已摸清,未动)
-- 方案:`src/styles.css`(1318 行)拆成 `src/styles/` 下 4 个文件,顺序不变渲染就不变:
-  - `base.css` = 原 1–141 行(tokens/reset/布局/侧栏/顶栏)
-  - `components.css` = 143–664(面板/按钮/表格/图表/对话框)
-  - `timer.css` = 666–1143(计时器页 + 全屏钟 + 两段响应式)
-  - `extras.css` = 1145–1318(经验基准/数据安全/周报洞察/导入预览/横幅)
-  - `styles.css` 变为 `@import` 清单;原 142/665/1144 行是空行,切分时跳过。
-- 建议用 PowerShell `Get-Content` 按行号切分并**逐字节比对**后再提交。
+### 6.1 ESLint / Prettier ✅ 已完成
+- 配置见 `eslint.config.js`(关闭了 v7 新规则 `set-state-in-effect`,它对挂载初始化的同步 setState 过于激进;`react-hooks/purity` 保持开启,SettingsView 的相对时间显示已改为每分钟跳动的 `now` 状态)
+- 遗留:`react-refresh/only-export-components` 有 3 个警告(dialogs.tsx 同时导出组件与对话框服务函数),可接受;若想清零,把 `alertDialog/confirmDialog/promptDialog` 挪到独立文件。
 
-### 6.3 React.lazy 按视图分包(未做)
-- `App.tsx` 中 11 个视图改 `lazy(() => import(...))` + 一个 `Suspense` 包裹视图区;当前 bundle 约 452KB / gzip 137KB,分包后首屏会小不少。
+### 6.2 styles.css 拆分 ✅ 已完成
+- `src/styles.css`(manifest)→ `src/styles/{base,components,timer,extras}.css`;后续新增样式直接追加到对应文件(新加的 `.view-loading` 在 extras.css 末尾)。
 
-### 6.4 CHANGELOG + 版本号(未做)
-- 目前 `package.json` 版本 `1.0.0`;建议按里程碑写 `CHANGELOG.md`(1.0.0 初始 → 1.1.0 P0+P1 → 1.2.0 P2 → 1.3.0 可靠性加固 → 1.4.0 工程规范)。
+### 6.3 React.lazy 按视图分包 ✅ 已完成
+- `App.tsx` 顶部 11 个视图均为 `lazy(() => import(...))`,视图区包在单个 `<Suspense fallback={...}>` 内;新加视图记得同样用 `lazy` 引入。
+
+### 6.4 CHANGELOG + 版本号 ✅ 已完成
+- `CHANGELOG.md` 按里程碑记录(1.0.0 → 1.4.0),`package.json` 版本 `1.4.0`。
 
 ### 6.5 更早的低优先(可长期搁置)
 - 评分引擎分钟级循环/`withUnifiedSchedule` 全量重建:数据量上几千条再优化。

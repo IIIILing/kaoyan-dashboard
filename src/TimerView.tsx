@@ -12,7 +12,6 @@ import {
   RotateCcw,
   Scissors,
   Settings2,
-  SlidersHorizontal,
   Square,
   TimerReset,
   Trash2,
@@ -324,6 +323,8 @@ export default function TimerView({ state, accountId, launchRequest, onLaunchHan
     if (status === "idle") beginTimer(launchRequest);
     else setFeedback(`“${launchRequest.task}”尚未开始：请先结束或清空当前计时。`);
     onLaunchHandled();
+    // beginTimer 依赖多个状态/setter,刻意不列入依赖:handledLaunchIdRef 保证只执行一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [launchRequest, onLaunchHandled, status]);
 
   useEffect(() => {

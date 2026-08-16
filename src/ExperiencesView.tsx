@@ -251,7 +251,7 @@ export default function ExperiencesView({ state, updateState }: Props) {
   );
 }
 
-function ExperienceSubjectEditor({ state, experience, subject, onUpdate, onUpdateMilestone, onAddMilestone, onDeleteMilestone, onDelete }: {
+function ExperienceSubjectEditor({ state, subject, onUpdate, onUpdateMilestone, onAddMilestone, onDeleteMilestone, onDelete }: {
   state: StudyState;
   experience: ExperiencePost;
   subject: ExperienceSubject;

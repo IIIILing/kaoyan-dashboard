@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import { confirmDialog } from "../components/dialogs";
 import { ProgressRing } from "../components/ui";

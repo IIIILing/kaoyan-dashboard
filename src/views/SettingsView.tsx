@@ -56,8 +56,14 @@ export default function SettingsView({
   const [customMode, setCustomMode] = useState<"light" | "dark">("light");
   const [newAccountName, setNewAccountName] = useState("");
   const [accountNames, setAccountNames] = useState<Record<string, string>>({});
+  // 每分钟刷新一次的"当前时间",用于"x 天前/刚刚"这类相对时间显示(避免 render 中调用 Date.now)
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const backupTimestamp = state.dataSafety.lastExternalBackupAt;
-  const backupAgeDays = backupTimestamp ? Math.floor((Date.now() - new Date(backupTimestamp).getTime()) / 86_400_000) : null;
+  const backupAgeDays = backupTimestamp ? Math.floor((now - new Date(backupTimestamp).getTime()) / 86_400_000) : null;
   const backupNeedsAttention = backupAgeDays === null || backupAgeDays >= 7;
   const dataVolume = state.sessions.length + state.plans.reduce((sum, plan) => sum + plan.items.length, 0) + state.examRecords.length + state.reviewItems.length;
   const stateSizeKb = Math.max(1, Math.round(new Blob([JSON.stringify(state)]).size / 1024));
@@ -273,7 +279,7 @@ export default function SettingsView({
         <div className="panel-heading"><div><p className="card-kicker">数据安全中心</p><h2>本机存储与外部备份</h2></div><HardDrive size={19} /></div>
         <p className="settings-copy">自动保存只保护当前浏览器里的副本；JSON 下载才是可迁移、可恢复的外部备份。</p>
         <div className="data-safety-grid">
-          <article className="positive"><span>最近自动保存</span><strong>{lastSavedAt ? (Date.now() - new Date(lastSavedAt).getTime() < 60_000 ? "刚刚" : new Date(lastSavedAt).toLocaleString("zh-CN")) : "正在读取"}</strong><small>当前账号 · 浏览器本机</small></article>
+          <article className="positive"><span>最近自动保存</span><strong>{lastSavedAt ? (now - new Date(lastSavedAt).getTime() < 60_000 ? "刚刚" : new Date(lastSavedAt).toLocaleString("zh-CN")) : "正在读取"}</strong><small>当前账号 · 浏览器本机</small></article>
           <article className={backupNeedsAttention ? "negative" : "positive"}><span>最近外部备份</span><strong>{backupTimestamp ? (backupAgeDays === 0 ? "今天" : `${backupAgeDays} 天前`) : "从未备份"}</strong><small>{backupTimestamp ? new Date(backupTimestamp).toLocaleString("zh-CN") : "请立即导出一个 JSON 文件"}</small></article>
           <article><span>数据条目</span><strong>{dataVolume}</strong><small>时间、计划、成绩与复习项</small></article>
           <article><span>本机数据量</span><strong>{stateSizeKb} KB</strong><small>{state.subjects.length} 科目 · {state.experiences.length} 篇经验</small></article>

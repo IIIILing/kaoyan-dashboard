@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -57,17 +57,19 @@ import {
   type StudyState,
 } from "./study-state";
 import { applyThemePalette } from "./theme-palettes";
-import ExperiencesView from "./ExperiencesView";
-import ExamsView from "./ExamsView";
-import ReviewView from "./ReviewView";
-import TimerView, { type TimerLaunchRequest } from "./TimerView";
-import Overview from "./views/Overview";
-import RecordsView from "./views/RecordsView";
-import ScoringView from "./views/ScoringView";
-import SettingsView from "./views/SettingsView";
-import SubjectsView from "./views/SubjectsView";
-import TodayView from "./views/TodayView";
-import WeeklyView from "./views/WeeklyView";
+import type { TimerLaunchRequest } from "./TimerView";
+// 视图按需分包(React.lazy):首屏只加载当前视图,切换视图时才拉取对应 chunk。
+const ExperiencesView = lazy(() => import("./ExperiencesView"));
+const ExamsView = lazy(() => import("./ExamsView"));
+const ReviewView = lazy(() => import("./ReviewView"));
+const TimerView = lazy(() => import("./TimerView"));
+const Overview = lazy(() => import("./views/Overview"));
+const RecordsView = lazy(() => import("./views/RecordsView"));
+const ScoringView = lazy(() => import("./views/ScoringView"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+const SubjectsView = lazy(() => import("./views/SubjectsView"));
+const TodayView = lazy(() => import("./views/TodayView"));
+const WeeklyView = lazy(() => import("./views/WeeklyView"));
 
 type SaveStatus = "loading" | "saving" | "saved" | "error";
 type UndoAction = {
@@ -325,8 +327,9 @@ export default function Dashboard() {
     [todaySessions, state.profile.dailyTargetHours, state.scoring.weights, state.lifeActivities],
   );
   const progress = useMemo(() => projectProgress(state.subjects), [state.subjects]);
-  const sevenDates = useMemo(() => recentDates(7), [today]);
-  const thirtyDates = useMemo(() => recentDates(30), [today]);
+  // 近 7/30 日窗口按页面加载时刻生成(跨天继续使用时,刷新页面即重新计算)
+  const sevenDates = useMemo(() => recentDates(7), []);
+  const thirtyDates = useMemo(() => recentDates(30), []);
   const weekMetrics = useMemo(
     () =>
       sevenDates.map((date) => ({
@@ -815,6 +818,7 @@ export default function Dashboard() {
           </div>
         )}
 
+        <Suspense fallback={<div className="view-loading" aria-busy="true">加载中…</div>}>
         {view === "overview" && (
           <Overview
             state={state}
@@ -903,6 +907,7 @@ export default function Dashboard() {
             }}
           />
         )}
+        </Suspense>
         <input ref={importRef} type="file" hidden accept="application/json" onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) readImportFile(file);
