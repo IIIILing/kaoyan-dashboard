@@ -1,6 +1,6 @@
 import { Download, FileUp, Plus, Save, Target, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { alertDialog, confirmDialog } from "./components/dialogs";
+import { alertDialog, confirmDialog } from "./components/dialog-service";
 import {
   CANONICAL_EXPERIENCE_SUBJECTS,
   createEmptyExperience,

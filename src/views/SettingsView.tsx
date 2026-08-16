@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import type { DashboardAccount } from "../lib/accounts";
-import { alertDialog, confirmDialog } from "../components/dialogs";
+import { alertDialog, confirmDialog } from "../components/dialog-service";
 import { compressImageFile } from "../lib/image";
 import { COLOR_FIELDS, THEME_PALETTES } from "../theme-palettes";
 import {

@@ -1,5 +1,5 @@
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
-import { confirmDialog } from "../components/dialogs";
+import { confirmDialog } from "../components/dialog-service";
 import { ProgressRing } from "../components/ui";
 import { formatMinutes } from "../lib/format";
 import type { PeriodSummary } from "../lib/scoring";

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Download, FileUp, Plus } from "lucide-react";
-import { PhaseEditorDialog, alertDialog, confirmDialog } from "../components/dialogs";
+import { PhaseEditorDialog } from "../components/dialogs";
+import { alertDialog, confirmDialog } from "../components/dialog-service";
 import { ProgressRing } from "../components/ui";
 import { benchmarkPhaseProgress, benchmarkProjectProgress, benchmarkSubjectProgress } from "../experience-data";
 import { localDate } from "../lib/dates";

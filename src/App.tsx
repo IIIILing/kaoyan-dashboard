@@ -24,7 +24,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { BackupDialog, DialogHost, PlanItemDialog, RecordDialog, alertDialog, confirmDialog } from "./components/dialogs";
+import { BackupDialog, DialogHost, PlanItemDialog, RecordDialog } from "./components/dialogs";
+import { alertDialog, confirmDialog } from "./components/dialog-service";
 import {
   ACCOUNT_REGISTRY_KEY,
   ACCOUNT_STATE_PREFIX,
@@ -686,6 +687,11 @@ export default function Dashboard() {
 
   const viewTitle = NAV.find((item) => item.id === view)?.label ?? "总览";
   const activeAccount = accounts.find((account) => account.id === activeAccountId);
+
+  // 浏览器标题随视图切换(总览页用默认标题)。
+  useEffect(() => {
+    document.title = view === "overview" ? "考研项目管理台" : `考研项目管理台 · ${viewTitle}`;
+  }, [view, viewTitle]);
 
   // 备份提醒:有实际数据、且超过 7 天未导出 JSON 时,在页面顶部提示(今日已手动关闭则不再显示)。
   const backupTimestamp = state.dataSafety.lastExternalBackupAt;
